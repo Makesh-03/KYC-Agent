@@ -1,0 +1,10 @@
+gradio
+sentence-transformers
+torch
+unstructured
+requests
+pdfminer.six
+pillow-heif
+pi-heif
+unstructured-inference
+pdf2image
