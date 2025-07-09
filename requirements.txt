@@ -1,7 +1,7 @@
 gradio
 sentence-transformers
 torch
-unstructured
+unstructured[local-inference]
 requests
 pdfminer.six
 pillow-heif

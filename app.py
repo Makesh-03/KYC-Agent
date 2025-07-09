@@ -15,16 +15,24 @@ CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY", "MG59-MX89-EE34-ZR95")
 
 # Handle both PDFs and images
 def extract_text_from_file(file_path):
-    mime_type, _ = mimetypes.guess_type(file_path)
+    try:
+        mime_type, _ = mimetypes.guess_type(file_path)
 
-    if mime_type == "application/pdf":
-        elements = partition_pdf(file_path)
-    elif mime_type and mime_type.startswith("image/"):
-        elements = partition_image(filename=file_path)
-    else:
-        raise ValueError("Unsupported file type. Please upload a PDF or image.")
+        if mime_type == "application/pdf":
+            elements = partition_pdf(file_path)
+        elif mime_type and mime_type.startswith("image/"):
+            elements = partition_image(filename=file_path)
+        else:
+            raise ValueError("Unsupported file type. Please upload a PDF or image.")
 
-    return "\n".join([str(e) for e in elements])
+        return "\n".join([str(e) for e in elements])
+    except Exception as e:
+        if "OCRAgent" in str(e):
+            raise RuntimeError(
+                "OCR processing failed. Please ensure Tesseract is installed and "
+                "that the 'unstructured[local-inference]' package is installed."
+            )
+        raise e
 
 # Extract Canadian address from text
 def extract_address(text):
