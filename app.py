@@ -9,6 +9,8 @@ from sentence_transformers import SentenceTransformer, util
 from unstructured.partition.pdf import partition_pdf
 from unstructured.partition.image import partition_image
 
+os.environ["OCR_AGENT"] = "tesseract"
+
 # Load sentence transformer model once
 model = SentenceTransformer("all-MiniLM-L6-v2")
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY", "MG59-MX89-EE34-ZR95")
