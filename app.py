@@ -85,6 +85,7 @@ def verify_with_canada_post(address):
             "Country": "CAN"
         })
         data = response.json()
+        print(f"Canada Post API response: {data}")
         return len(data.get("Items", [])) > 0
     except Exception as e:
         print(f"Canada Post API error: {e}")
