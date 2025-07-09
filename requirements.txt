@@ -9,9 +9,6 @@ pi-heif
 unstructured-inference
 pdf2image
 pytesseract
-
-
-
-
-
-
+langchain
+langchain-huggingface
+langchain-community

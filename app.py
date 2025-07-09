@@ -9,23 +9,37 @@ from sentence_transformers import SentenceTransformer, util
 from unstructured.partition.pdf import partition_pdf
 from unstructured.partition.image import partition_image
 
+from langchain_huggingface import HuggingFacePipeline
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 
-# Load sentence transformer model once
-model = SentenceTransformer("all-MiniLM-L6-v2")
+# --- Model and API Configuration ---
+
+# Load sentence transformer model for semantic similarity
+similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# Load LLM for intelligent address extraction
+llm = HuggingFacePipeline.from_model_id(
+    model_id="google/flan-t5-large",
+    task="text2text-generation",
+    pipeline_kwargs={"max_new_tokens": 100},
+)
+
+# Get Canada Post API key from environment
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
-# Handle both PDFs and images
+# --- Core Functions ---
+
 def extract_text_from_file(file_path):
+    """Extracts raw text from a PDF or image file."""
     try:
         mime_type, _ = mimetypes.guess_type(file_path)
-
         if mime_type == "application/pdf":
             elements = partition_pdf(file_path)
         elif mime_type and mime_type.startswith("image/"):
             elements = partition_image(filename=file_path)
         else:
             raise ValueError("Unsupported file type. Please upload a PDF or image.")
-
         return "\n".join([str(e) for e in elements])
     except Exception as e:
         if "OCRAgent" in str(e):
@@ -35,99 +49,91 @@ def extract_text_from_file(file_path):
             )
         raise e
 
-# Extract Canadian address from text
-def extract_address(text):
-    """
-    Extracts a Canadian address from text using a more robust, two-step approach.
-    1. Find a postal code.
-    2. Work backward to find the start of the address (a street number).
-    """
-    postal_code_pattern = r'[A-Z]\d[A-Z]\s?\d[A-Z]\d'
-    postal_code_match = re.search(postal_code_pattern, text, re.IGNORECASE)
+def extract_address_with_llm(text):
+    """Uses an LLM to intelligently extract the address from the text."""
+    prompt = PromptTemplate(
+        template=(
+            "Please extract the full Canadian mailing address from the following text. "
+            "The address should include the street, city, province, and postal code. "
+            "If no address is found, please return an empty string.\n\n"
+            "Text: {document_text}\n\nAddress:"
+        ),
+        input_variables=["document_text"],
+    )
+    chain = LLMChain(llm=llm, prompt=prompt)
+    result = chain.invoke({"document_text": text})
+    return result["text"].strip()
 
-    if not postal_code_match:
-        return ""
-
-    # Search for the address in the text preceding the postal code
-    end_pos = postal_code_match.end()
-    preceding_text = text[:end_pos]
-
-    # Find the last occurrence of a street number pattern before the postal code
-    street_number_matches = list(re.finditer(r'\b\d{1,5}\b', preceding_text))
-    if not street_number_matches:
-        return ""
-
-    start_pos = street_number_matches[-1].start()
-    
-    # Extract the full address string
-    address = text[start_pos:end_pos].strip()
-    
-    # Clean up common OCR artifacts like a numbered list prefix
-    address = re.sub(r'^\d\.\s*', '', address)
-    
-    return address
-
-# Semantic similarity between expected and extracted address
 def semantic_match(extracted, expected, threshold=0.85):
-    embeddings = model.encode([extracted, expected], convert_to_tensor=True)
+    """Calculates the semantic similarity between two addresses."""
+    embeddings = similarity_model.encode([extracted, expected], convert_to_tensor=True)
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
     return sim.item(), sim.item() >= threshold
 
-# Validate using Canada Post AddressComplete API
 def verify_with_canada_post(address):
+    """Verifies an address using the Canada Post AddressComplete API."""
     if not CANADA_POST_API_KEY:
-        # This will now be the primary error if the secret is missing.
         return {"error": "CANADA_POST_API_KEY secret not set in Hugging Face Space settings."}
     try:
         url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
-        response = requests.get(url, params={
-            "Key": CANADA_POST_API_KEY,
-            "Text": address,
-            "Country": "CAN"
-        })
+        response = requests.get(
+            url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
+        )
         data = response.json()
         return len(data.get("Items", [])) > 0
     except Exception as e:
         print(f"Canada Post API error: {e}")
         return False
 
-# Main KYC verification function
+# --- Main KYC Verification Workflow ---
+
 def kyc_verify(file, expected_address):
+    """The main function that orchestrates the entire KYC verification process."""
     if file is None:
         return {"error": "Please upload a document to verify."}
     try:
-        file_path = file.name  # Use the path from the Gradio File object
-        text = extract_text_from_file(file_path)
-        extracted_address = extract_address(text)
+        # 1. Extract text from the uploaded document
+        text = extract_text_from_file(file.name)
+        if not text:
+            return {"error": "Could not extract any text from the document."}
 
+        # 2. Use the LLM to intelligently find the address
+        extracted_address = extract_address_with_llm(text)
         if not extracted_address:
-            return {"error": "No valid Canadian address found in the document."}
+            return {"error": "Could not find a valid address in the document."}
 
+        # 3. Perform semantic and Canada Post verifications
         sim_score, sem_ok = semantic_match(extracted_address, expected_address)
-        cp_ok = verify_with_canada_post(extracted_address) if CANADA_POST_API_KEY else None
+        cp_ok = verify_with_canada_post(extracted_address)
 
-        result = {
+        # 4. Compile and return the final result
+        return {
             "extracted_address": extracted_address,
             "semantic_similarity": round(sim_score, 3),
             "address_match": sem_ok,
             "canada_post_verified": cp_ok,
-            "final_result": sem_ok and (cp_ok if cp_ok is not None else True)
+            "final_result": sem_ok and (cp_ok if cp_ok is not None else True),
         }
-        return result
-
     except Exception as e:
         return {"error": str(e)}
 
-# Gradio UI
+# --- Gradio User Interface ---
+
 iface = gr.Interface(
     fn=kyc_verify,
     inputs=[
         gr.File(label="Upload Passport or Bill (PDF or Image)", file_types=["pdf", "image"]),
-        gr.Textbox(label="Expected Address", placeholder="e.g., 123 Main St, Toronto, ON, A1A1A1")
+        gr.Textbox(
+            label="Expected Address",
+            placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2",
+        ),
     ],
     outputs="json",
-    title="🇨🇦 KYC Document Verifier",
-    description="Upload a Canadian document and verify the extracted address against the expected input using OCR and NLP."
+    title="🇨🇦 Intelligent KYC Document Verifier",
+    description=(
+        "Upload a Canadian document and this AI agent will intelligently find and "
+        "verify the address using an LLM, semantic search, and the Canada Post API."
+    ),
 )
 
 if __name__ == "__main__":
