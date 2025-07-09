@@ -9,7 +9,6 @@ from sentence_transformers import SentenceTransformer, util
 from unstructured.partition.pdf import partition_pdf
 from unstructured.partition.image import partition_image
 
-os.environ["OCR_AGENT"] = "tesseract"
 
 # Load sentence transformer model once
 model = SentenceTransformer("all-MiniLM-L6-v2")
@@ -38,7 +37,9 @@ def extract_text_from_file(file_path):
 
 # Extract Canadian address from text
 def extract_address(text):
-    pattern = r'\d{1,5} [A-Za-z0-9 .]+, [A-Za-z\'\- ]+, [A-Z]{2}, [A-Z]\d[A-Z] ?\d[A-Z]\d'
+    # This regex is designed to be more flexible and handle common OCR errors.
+    # It allows for an optional prefix (like "8."), optional commas, and variations in spacing.
+    pattern = r"(?:\d\.\s?)?(\d{1,5}\s[A-Za-z0-9\s\.-]+?,\s?[A-Za-z\s\'-]+,?\s[A-Z]{2},?\s[A-Z]\d[A-Z]\s?\d[A-Z]\d)"
     match = re.search(pattern, text, re.IGNORECASE)
     return match.group(0) if match else ""
 
@@ -72,7 +73,6 @@ def kyc_verify(file, expected_address):
     try:
         file_path = file.name  # Use the path from the Gradio File object
         text = extract_text_from_file(file_path)
-        print(f"Extracted text: {text}")
         extracted_address = extract_address(text)
 
         if not extracted_address:
