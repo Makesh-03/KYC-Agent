@@ -1,32 +1,47 @@
 import os
-import gradio as gr
+import mimetypes
 import re
 import requests
+import gradio as gr
 from tempfile import NamedTemporaryFile
-from unstructured.partition.pdf import partition_pdf
 from sentence_transformers import SentenceTransformer, util
 
-# Load model once
+from unstructured.partition.pdf import partition_pdf
+from unstructured.partition.image import partition_image
+
+# Load sentence transformer model once
 model = SentenceTransformer("all-MiniLM-L6-v2")
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY", "MG59-MX89-EE34-ZR95")
 
-def extract_text_from_pdf(file_path):
-    elements = partition_pdf(file_path)
+# Handle both PDFs and images
+def extract_text_from_file(file_path):
+    mime_type, _ = mimetypes.guess_type(file_path)
+
+    if mime_type == "application/pdf":
+        elements = partition_pdf(file_path)
+    elif mime_type and mime_type.startswith("image/"):
+        elements = partition_image(filename=file_path)
+    else:
+        raise ValueError("Unsupported file type. Please upload a PDF or image.")
+
     return "\n".join([str(e) for e in elements])
 
+# Extract Canadian address from text
 def extract_address(text):
-    pattern = r'\d{1,5} [A-Za-z0-9\. ]+, [A-Za-z\.\- ]+, [A-Z]{2},? [A-Z]\d[A-Z] \d[A-Z]\d'
+    pattern = r'\d{1,5} [A-Za-z0-9 .]+, [A-Za-z\'\- ]+, [A-Z]{2}, [A-Z]\d[A-Z] ?\d[A-Z]\d'
     match = re.search(pattern, text)
     return match.group(0) if match else ""
 
+# Semantic similarity between expected and extracted address
 def semantic_match(extracted, expected, threshold=0.85):
     embeddings = model.encode([extracted, expected], convert_to_tensor=True)
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
     return sim.item(), sim.item() >= threshold
 
+# Validate using Canada Post AddressComplete API
 def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
-        return False
+        return None
     try:
         url = "https://ws1.addresscomplete.com/Rest/Find/v2.10/json3.ws"
         response = requests.get(url, params={
@@ -37,41 +52,43 @@ def verify_with_canada_post(address):
         data = response.json()
         return len(data.get("Items", [])) > 0
     except Exception as e:
-        print(f"Canada Post error: {e}")
+        print(f"Canada Post API error: {e}")
         return False
 
+# Main KYC verification function
 def kyc_verify(file, expected_address):
-    if file is None:
-        return {"error": "Please upload a document to verify."}
+    try:
+        with NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(file.read())
+            file_path = tmp.name
 
-    with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp.write(file.read())
-        file_path = tmp.name
+        text = extract_text_from_file(file_path)
+        extracted_address = extract_address(text)
 
-    text = extract_text_from_pdf(file_path)
-    extracted_address = extract_address(text)
+        if not extracted_address:
+            return {"error": "No valid Canadian address found in the document."}
 
-    if not extracted_address:
-        return {"error": "No address found in document."}
+        sim_score, sem_ok = semantic_match(extracted_address, expected_address)
+        cp_ok = verify_with_canada_post(extracted_address) if CANADA_POST_API_KEY else None
 
-    sim_score, sem_ok = semantic_match(extracted_address, expected_address)
-    cp_ok = verify_with_canada_post(extracted_address) if CANADA_POST_API_KEY else None
+        result = {
+            "extracted_address": extracted_address,
+            "semantic_similarity": round(sim_score, 3),
+            "address_match": sem_ok,
+            "canada_post_verified": cp_ok,
+            "final_result": sem_ok and (cp_ok if cp_ok is not None else True)
+        }
+        return result
 
-    result = {
-        "extracted_address": extracted_address,
-        "semantic_similarity": round(sim_score, 3),
-        "address_match": sem_ok,
-        "canada_post_verified": cp_ok,
-        "final_result": sem_ok and (cp_ok if cp_ok is not None else True)
-    }
-    return result
+    except Exception as e:
+        return {"error": str(e)}
 
-# Gradio Interface
+# Gradio UI
 iface = gr.Interface(
     fn=kyc_verify,
     inputs=[
-        gr.File(label="Upload Passport/Bill (PDF)"),
-        gr.Textbox(label="Expected Address")
+        gr.File(label="Upload Passport or Bill (PDF or Image)"),
+        gr.Textbox(label="Expected Address", placeholder="e.g., 123 Main St, Toronto, ON, A1A1A1")
     ],
     outputs="json",
     title="🇨🇦 KYC Document Verifier",
