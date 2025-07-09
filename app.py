@@ -50,12 +50,17 @@ def extract_text_from_file(file_path):
         raise e
 
 def extract_address_with_llm(text):
-    """Uses an LLM to intelligently extract the address from the text."""
+    """Uses an LLM to intelligently extract the address from the text with a few-shot prompt."""
     prompt = PromptTemplate(
         template=(
             "Please extract the full Canadian mailing address from the following text. "
             "The address should include the street, city, province, and postal code. "
-            "If no address is found, please return an empty string.\n\n"
+            "Here is an example of how to do it:\n\n"
+            "--- Example ---\n"
+            "Text: 'Driver Licence /Permis oes 4a.nonr M981 209050 ‘4a, tss/Dé1 2024/06/28 3. DOB/DDN 4b.Exp 2028/12/09 1. MANICKAM THAMARAI 2. MAKESH KARTHIK 8.2 THORBURN ROAD ST JOHNS, NL A1B 3L7 15. Sexisexe M 46, HgtTaille 167 48. EyesYeux BRO BRN 9. Class/Classe 05 9a oi'\n"
+            "Address: 2 THORBURN ROAD ST JOHNS, NL A1B 3L7\n"
+            "--- End Example ---\n\n"
+            "Now, please extract the address from the following text. If no address is found, return an empty string.\n\n"
             "Text: {document_text}\n\nAddress:"
         ),
         input_variables=["document_text"],
@@ -132,7 +137,8 @@ iface = gr.Interface(
     title="🇨🇦 Intelligent KYC Document Verifier",
     description=(
         "Upload a Canadian document and this AI agent will intelligently find and "
-        "verify the address using an LLM, semantic search, and the Canada Post API."
+        "verify the address using an LLM, semantic search, and the Canada Post API.\n\n"
+        "**Privacy Warning:** This is a public demo. Do not upload real, sensitive documents."
     ),
 )
 
