@@ -15,7 +15,7 @@ def extract_text_from_pdf(file_path):
     return "\n".join([str(e) for e in elements])
 
 def extract_address(text):
-    pattern = r'\d{1,5} [A-Za-z ]+, [A-Za-z]+, [A-Z]{2}, [A-Z]\d[A-Z] \d[A-Z]\d'
+    pattern = r'\d{1,5} [A-Za-z0-9\. ]+, [A-Za-z\.\- ]+, [A-Z]{2},? [A-Z]\d[A-Z] \d[A-Z]\d'
     match = re.search(pattern, text)
     return match.group(0) if match else ""
 
@@ -41,6 +41,9 @@ def verify_with_canada_post(address):
         return False
 
 def kyc_verify(file, expected_address):
+    if file is None:
+        return {"error": "Please upload a document to verify."}
+
     with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file.read())
         file_path = tmp.name
