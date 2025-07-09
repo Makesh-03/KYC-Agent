@@ -8,7 +8,7 @@ pillow-heif
 pi-heif
 unstructured-inference
 pdf2image
-
+pytesseract
 
 
 
