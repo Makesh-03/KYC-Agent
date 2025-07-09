@@ -57,11 +57,10 @@ def verify_with_canada_post(address):
 
 # Main KYC verification function
 def kyc_verify(file, expected_address):
+    if file is None:
+        return {"error": "Please upload a document to verify."}
     try:
-        with NamedTemporaryFile(delete=False) as tmp:
-            tmp.write(file.read())
-            file_path = tmp.name
-
+        file_path = file.name  # Use the path from the Gradio File object
         text = extract_text_from_file(file_path)
         extracted_address = extract_address(text)
 
@@ -87,7 +86,7 @@ def kyc_verify(file, expected_address):
 iface = gr.Interface(
     fn=kyc_verify,
     inputs=[
-        gr.File(label="Upload Passport or Bill (PDF or Image)"),
+        gr.File(label="Upload Passport or Bill (PDF or Image)", file_types=["pdf", "image"]),
         gr.Textbox(label="Expected Address", placeholder="e.g., 123 Main St, Toronto, ON, A1A1A1")
     ],
     outputs="json",
