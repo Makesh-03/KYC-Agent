@@ -37,11 +37,35 @@ def extract_text_from_file(file_path):
 
 # Extract Canadian address from text
 def extract_address(text):
-    # This regex is designed to be more flexible and handle common OCR errors.
-    # It allows for an optional prefix (like "8."), optional commas, and variations in spacing.
-    pattern = r"(?:\d\.\s?)?(\d{1,5}\s[A-Za-z0-9\s\.-]+?,\s?[A-Za-z\s\'-]+,?\s[A-Z]{2},?\s[A-Z]\d[A-Z]\s?\d[A-Z]\d)"
-    match = re.search(pattern, text, re.IGNORECASE)
-    return match.group(0) if match else ""
+    """
+    Extracts a Canadian address from text using a more robust, two-step approach.
+    1. Find a postal code.
+    2. Work backward to find the start of the address (a street number).
+    """
+    postal_code_pattern = r'[A-Z]\d[A-Z]\s?\d[A-Z]\d'
+    postal_code_match = re.search(postal_code_pattern, text, re.IGNORECASE)
+
+    if not postal_code_match:
+        return ""
+
+    # Search for the address in the text preceding the postal code
+    end_pos = postal_code_match.end()
+    preceding_text = text[:end_pos]
+
+    # Find the last occurrence of a street number pattern before the postal code
+    street_number_matches = list(re.finditer(r'\b\d{1,5}\b', preceding_text))
+    if not street_number_matches:
+        return ""
+
+    start_pos = street_number_matches[-1].start()
+    
+    # Extract the full address string
+    address = text[start_pos:end_pos].strip()
+    
+    # Clean up common OCR artifacts like a numbered list prefix
+    address = re.sub(r'^\d\.\s*', '', address)
+    
+    return address
 
 # Semantic similarity between expected and extracted address
 def semantic_match(extracted, expected, threshold=0.85):
