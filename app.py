@@ -39,7 +39,7 @@ def extract_text_from_file(file_path):
 # Extract Canadian address from text
 def extract_address(text):
     pattern = r'\d{1,5} [A-Za-z0-9 .]+, [A-Za-z\'\- ]+, [A-Z]{2}, [A-Z]\d[A-Z] ?\d[A-Z]\d'
-    match = re.search(pattern, text)
+    match = re.search(pattern, text, re.IGNORECASE)
     return match.group(0) if match else ""
 
 # Semantic similarity between expected and extracted address
@@ -72,6 +72,7 @@ def kyc_verify(file, expected_address):
     try:
         file_path = file.name  # Use the path from the Gradio File object
         text = extract_text_from_file(file_path)
+        print(f"Extracted text: {text}")
         extracted_address = extract_address(text)
 
         if not extracted_address:
