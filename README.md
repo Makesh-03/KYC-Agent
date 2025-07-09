@@ -16,8 +16,14 @@ This application is designed to run on Hugging Face Spaces and requires the Tess
 
 ### Dependencies
 
--   **System Packages:** The required system-level dependencies, including Tesseract, are listed in the `packages.txt` file. The Hugging Face platform will automatically install these packages.
--   **Python Packages:** The necessary Python libraries are listed in the `requirements.txt` file and will also be installed automatically.
+-   **System Packages:** The required system-level dependencies, including Tesseract, are listed in the `packages.txt` file. The Hugg-   **Python Packages:** The necessary Python libraries are listed in the `requirements.txt` file and will also be installed automatically.
+
+### Canada Post API Key
+
+The application uses the Canada Post AddressComplete API to verify the extracted address. To use this feature, you will need to:
+
+1.  **Get an API Key:** Obtain a free development key from the [Canada Post Developer Program](https://www.canadapost-postescanada.ca/cpc/en/business/ecommerce/development/addresscomplete.page).
+2.  **Add it to your Space:** In your Hugging Face Space, go to the **"Settings"** tab and add a new **"Secret"**. Name the secret `CANADA_POST_API_KEY` and paste your API key as the value.
 
 ## Running the Application
 
