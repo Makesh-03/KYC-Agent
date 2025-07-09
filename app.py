@@ -78,14 +78,14 @@ def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
         return None
     try:
-        url = "https://ws1.addresscomplete.com/Rest/Find/v2.10/json3.ws"
+        print(f"Using Canada Post API Key: {CANADA_POST_API_KEY}") # Debugging line
+        url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
         response = requests.get(url, params={
             "Key": CANADA_POST_API_KEY,
             "Text": address,
             "Country": "CAN"
         })
         data = response.json()
-        print(f"Canada Post API response: {data}")
         return len(data.get("Items", [])) > 0
     except Exception as e:
         print(f"Canada Post API error: {e}")
