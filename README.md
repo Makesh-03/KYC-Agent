@@ -12,28 +12,15 @@ short_description: customer verification
 
 ## Setup
 
-This application requires [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) to be installed on your system to process image-based documents.
+This application is designed to run on Hugging Face Spaces and requires the Tesseract OCR engine for image processing.
 
-### Installation
+### Dependencies
 
-1.  **Install Tesseract:**
-    If you are using macOS, you can install Tesseract using [Homebrew](https://brew.sh/):
-    ```bash
-    brew install tesseract
-    ```
-    For other operating systems, please refer to the [official Tesseract documentation](https://tesseract-ocr.github.io/tessdoc/Installation.html).
-
-2.  **Install Python Dependencies:**
-    Once Tesseract is installed, you can install the required Python packages using pip:
-    ```bash
-    pip install -r requirements.txt
-    ```
+-   **System Packages:** The required system-level dependencies, including Tesseract, are listed in the `packages.txt` file. The Hugging Face platform will automatically install these packages.
+-   **Python Packages:** The necessary Python libraries are listed in the `requirements.txt` file and will also be installed automatically.
 
 ## Running the Application
 
-To start the application, run the following command:
-```bash
-python app.py
-```
+The application will start automatically when the Hugging Face Space is launched.
 
 Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
