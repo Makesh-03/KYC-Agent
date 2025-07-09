@@ -12,7 +12,7 @@ from unstructured.partition.image import partition_image
 
 # Load sentence transformer model once
 model = SentenceTransformer("all-MiniLM-L6-v2")
-CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY", "MG59-MX89-EE34-ZR95")
+CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
 # Handle both PDFs and images
 def extract_text_from_file(file_path):
@@ -76,9 +76,9 @@ def semantic_match(extracted, expected, threshold=0.85):
 # Validate using Canada Post AddressComplete API
 def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
-        return None
+        # This will now be the primary error if the secret is missing.
+        return {"error": "CANADA_POST_API_KEY secret not set in Hugging Face Space settings."}
     try:
-        print(f"Using Canada Post API Key: {CANADA_POST_API_KEY}") # Debugging line
         url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
         response = requests.get(url, params={
             "Key": CANADA_POST_API_KEY,
