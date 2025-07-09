@@ -8,7 +8,7 @@ from sentence_transformers import SentenceTransformer, util
 
 # Load model once
 model = SentenceTransformer("all-MiniLM-L6-v2")
-CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY", "")
+CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY", "MG59-MX89-EE34-ZR95")
 
 def extract_text_from_pdf(file_path):
     elements = partition_pdf(file_path)
