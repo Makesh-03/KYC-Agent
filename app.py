@@ -1,5 +1,6 @@
 import os
 import mimetypes
+import time
 import requests
 import gradio as gr
 from sentence_transformers import SentenceTransformer, util
@@ -24,22 +25,14 @@ CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 # --- Core Functions ---
 
 def extract_text_from_file(file_path):
-    try:
-        mime_type, _ = mimetypes.guess_type(file_path)
-        if mime_type == "application/pdf":
-            elements = partition_pdf(file_path)
-        elif mime_type and mime_type.startswith("image/"):
-            elements = partition_image(filename=file_path)
-        else:
-            raise ValueError("Unsupported file type. Please upload a PDF or image.")
-        return "\n".join([str(e) for e in elements])
-    except Exception as e:
-        if "OCRAgent" in str(e):
-            raise RuntimeError(
-                "OCR processing failed. Please ensure Tesseract is installed and "
-                "that the 'unstructured[local-inference]' package is installed."
-            )
-        raise e
+    mime_type, _ = mimetypes.guess_type(file_path)
+    if mime_type == "application/pdf":
+        elements = partition_pdf(file_path)
+    elif mime_type and mime_type.startswith("image/"):
+        elements = partition_image(filename=file_path)
+    else:
+        raise ValueError("Unsupported file type. Please upload a PDF or image.")
+    return "\n".join([str(e) for e in elements])
 
 def extract_address_with_llm(text):
     prompt = PromptTemplate(
@@ -68,42 +61,62 @@ def semantic_match(extracted, expected, threshold=0.85):
 def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
         return {"error": "CANADA_POST_API_KEY secret not set in Hugging Face Space settings."}
-    try:
-        url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
-        response = requests.get(
-            url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
-        )
-        data = response.json()
-        return len(data.get("Items", [])) > 0
-    except Exception as e:
-        print(f"Canada Post API error: {e}")
-        return False
+    url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
+    response = requests.get(
+        url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
+    )
+    data = response.json()
+    return len(data.get("Items", [])) > 0
+
+# --- Timed Main KYC Workflow ---
 
 def kyc_verify(file, expected_address):
     if file is None:
         return {"error": "Please upload a document to verify."}
     try:
+        results = {}
+        t0 = time.time()
+
+        # 1. Text Extraction
         text = extract_text_from_file(file.name)
         if not text:
             return {"error": "Could not extract any text from the document."}
+        t1 = time.time()
+        results["text_extraction_time"] = round(t1 - t0, 2)
+
+        # 2. LLM Extraction
         extracted_address = extract_address_with_llm(text)
         if not extracted_address:
             return {"error": "Could not find a valid address in the document."}
+        t2 = time.time()
+        results["llm_extraction_time"] = round(t2 - t1, 2)
+
+        # 3. Semantic Matching
         sim_score, sem_ok = semantic_match(extracted_address, expected_address)
+        t3 = time.time()
+        results["semantic_match_time"] = round(t3 - t2, 2)
+
+        # 4. Canada Post Validation
         cp_ok = verify_with_canada_post(extracted_address)
-        return {
+        t4 = time.time()
+        results["canada_post_time"] = round(t4 - t3, 2)
+
+        # Final output
+        results.update({
             "extracted_address": extracted_address,
             "semantic_similarity": round(sim_score, 3),
             "address_match": sem_ok,
             "canada_post_verified": cp_ok,
             "final_result": sem_ok and (cp_ok if cp_ok is not None else True),
-        }
+            "total_time": round(t4 - t0, 2),
+        })
+        return results
+
     except Exception as e:
         return {"error": str(e)}
 
-# --- Enhanced Custom CSS ---
+# --- Custom CSS for EZOFIS UI ---
 custom_css = """
-/* BIGGER TITLE */
 h1 {
     font-size: 42px !important;
     font-weight: 900 !important;
@@ -111,8 +124,6 @@ h1 {
     text-align: center;
     margin-bottom: 20px;
 }
-
-/* Purple Number Circles */
 .purple-circle {
     display: inline-flex;
     justify-content: center;
@@ -126,14 +137,10 @@ h1 {
     font-weight: bold;
     margin-right: 10px;
 }
-
-/* Section Labels */
 .gr-textbox label, .gr-file label {
     font-size: 18px !important;
     font-weight: bold;
 }
-
-/* Purple Button that works in dark mode too */
 .purple-button button {
     background-color: #a020f0 !important;
     color: white !important;
@@ -144,13 +151,12 @@ h1 {
     border: none !important;
     transition: background 0.3s ease-in-out;
 }
-
 .purple-button button:hover {
     background-color: #c45eff !important;
 }
 """
 
-# --- Gradio Interface with Clean Title ---
+# --- Gradio UI Layout ---
 with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
     gr.Markdown("# EZOFIS KYC Agent")
 
