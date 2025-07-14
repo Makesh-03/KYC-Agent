@@ -27,8 +27,8 @@ def extract_text_from_file(file_path):
 
 def get_llm(model_choice):
     model_map = {
-        "Mistral": "openrouter/mistralai/mistral-7b-instruct",
-        "OpenAI": "openrouter/openai/gpt-4o"
+        "Mistral": "mistralai/mistral-7b-instruct",
+        "OpenAI": "openai/gpt-4o"
     }
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY is not set.")
