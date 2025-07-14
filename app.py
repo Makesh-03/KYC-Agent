@@ -1,14 +1,10 @@
 import os
 import mimetypes
-import re
 import requests
 import gradio as gr
-from tempfile import NamedTemporaryFile
 from sentence_transformers import SentenceTransformer, util
-
 from unstructured.partition.pdf import partition_pdf
 from unstructured.partition.image import partition_image
-
 from langchain_huggingface import HuggingFacePipeline
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
@@ -122,25 +118,76 @@ def kyc_verify(file, expected_address):
     except Exception as e:
         return {"error": str(e)}
 
-# --- Gradio User Interface ---
+# --- Custom CSS for Styling ---
+custom_css = """
+h1, .gr-textbox label, .gr-file label {
+    font-size: 20px !important;
+    font-weight: bold;
+}
 
-iface = gr.Interface(
-    fn=kyc_verify,
-    inputs=[
-        gr.File(label="Upload Passport or Bill (PDF or Image)", file_types=["pdf", "image"]),
-        gr.Textbox(
-            label="Expected Address",
-            placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2",
-        ),
-    ],
-    outputs="json",
-    title="🇨🇦 Intelligent KYC Document Verifier",
-    description=(
-        "Upload a Canadian document and this AI agent will intelligently find and "
-        "verify the address using an LLM, semantic search, and the Canada Post API.\n\n"
-        "**Privacy Warning:** This is a public demo. Do not upload real, sensitive documents."
-    ),
-)
+.purple-circle {
+    display: inline-block;
+    background-color: #6a0dad;
+    color: white;
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    text-align: center;
+    line-height: 28px;
+    margin-right: 8px;
+    font-weight: bold;
+}
+
+.purple-button button {
+    background-color: #6a0dad !important;
+    color: white !important;
+    font-weight: bold;
+    font-size: 16px;
+    padding: 10px 16px;
+}
+"""
+
+# --- Gradio Interface with Layout and Styling ---
+with gr.Blocks(css=custom_css, title="🇨🇦 Intelligent KYC Document Verifier") as iface:
+    gr.Markdown(
+        """
+        # 🇨🇦 Intelligent KYC Document Verifier  
+        Upload a Canadian document and this AI agent will intelligently find and verify the address using:
+        - 🧠 LLM for extraction  
+        - 🔍 Semantic similarity  
+        - 📫 Canada Post API for validation  
+        
+        **⚠️ Privacy Warning:** This is a public demo. Do not upload real, sensitive documents.
+        """
+    )
+
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("<span class='purple-circle'>1</span> **Upload Document**")
+            file_input = gr.File(
+                label="Upload Passport or Bill (PDF or Image)",
+                file_types=["pdf", "image"]
+            )
+        with gr.Column():
+            gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
+            expected_address = gr.Textbox(
+                label="Expected Address",
+                placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2"
+            )
+
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("<span class='purple-circle'>3</span> **KYC Verification Results**")
+            output_json = gr.JSON(label="Verification Output")
+
+    with gr.Row():
+        verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-button")
+
+    verify_btn.click(
+        fn=kyc_verify,
+        inputs=[file_input, expected_address],
+        outputs=output_json
+    )
 
 if __name__ == "__main__":
     iface.launch()
