@@ -14,18 +14,17 @@ from langchain.chains import LLMChain
 
 similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# OpenRouter ChatLLM Setup (Mistral)
+# OpenRouter Mistral Setup
 openrouter_key = os.getenv("OPENROUTER_API_KEY")
 
 llm = ChatOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=openrouter_key,
-    model="mistralai/mistral-7b-instruct",  # You can change to Mixtral, Claude, etc.
+    model="mistralai/mistral-7b-instruct",
     temperature=0.2,
     max_tokens=200
 )
 
-# Canada Post API Key
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
 # --- Core Functions ---
@@ -42,9 +41,17 @@ def extract_text_from_file(file_path):
 
 def extract_address_with_llm(text):
     prompt = ChatPromptTemplate.from_template(
-        "Extract the full Canadian mailing address from the following text. "
-        "Include the street, city, province, and postal code. Return only the address.\n\n"
-        "Text:\n{document_text}\n\nAddress:"
+        "You are an address extraction assistant. Extract only the full Canadian mailing address from the input text.\n"
+        "Return only the address on one line with no explanation.\n\n"
+        "Examples:\n"
+        "Input: 'BILL TO: 789 KING ST W, TORONTO, ON M5V 1M5 — Customer: Mark Jensen'\n"
+        "Output: 789 KING ST W, TORONTO, ON M5V 1M5\n"
+        "Input: 'Driver’s License Info: John Doe, 135 FRONT ST E TORONTO ON M5A 1E3, Class G'\n"
+        "Output: 135 FRONT ST E TORONTO ON M5A 1E3\n"
+        "Input: 'Mailing Address - 200 BLOOR ST W, TORONTO, ON, M5S 1T8'\n"
+        "Output: 200 BLOOR ST W, TORONTO, ON, M5S 1T8\n\n"
+        "Input: {document_text}\n"
+        "Output:"
     )
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"document_text": text})
@@ -72,31 +79,30 @@ def kyc_verify(file, expected_address):
         results = {}
         t0 = time.time()
 
-        # 1. Extract Text
+        # 1. Text Extraction
         text = extract_text_from_file(file.name)
         if not text:
             return {"error": "Could not extract any text from the document."}
         t1 = time.time()
         results["text_extraction_time"] = round(t1 - t0, 2)
 
-        # 2. Extract Address with LLM
+        # 2. LLM Address Extraction
         extracted_address = extract_address_with_llm(text)
         if not extracted_address:
             return {"error": "Could not find a valid address in the document."}
         t2 = time.time()
         results["llm_extraction_time"] = round(t2 - t1, 2)
 
-        # 3. Semantic Similarity
+        # 3. Semantic Match
         sim_score, sem_ok = semantic_match(extracted_address, expected_address)
         t3 = time.time()
         results["semantic_match_time"] = round(t3 - t2, 2)
 
-        # 4. Canada Post Verification
+        # 4. Canada Post Validation
         cp_ok = verify_with_canada_post(extracted_address)
         t4 = time.time()
         results["canada_post_time"] = round(t4 - t3, 2)
 
-        # Final
         results.update({
             "extracted_address": extracted_address,
             "semantic_similarity": round(sim_score, 3),
@@ -109,7 +115,7 @@ def kyc_verify(file, expected_address):
     except Exception as e:
         return {"error": str(e)}
 
-# --- Custom CSS (purple styles) ---
+# --- CSS for UI ---
 
 custom_css = """
 h1 {
@@ -151,7 +157,7 @@ h1 {
 }
 """
 
-# --- Gradio Interface Layout ---
+# --- UI Layout ---
 
 with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
     gr.Markdown("# EZOFIS KYC Agent")
