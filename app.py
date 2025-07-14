@@ -103,11 +103,13 @@ def kyc_verify(file, expected_address):
 
 # --- Enhanced Custom CSS ---
 custom_css = """
-/* Main Title */
+/* BIGGER TITLE */
 h1 {
-    font-size: 34px !important;
+    font-size: 42px !important;
     font-weight: 900 !important;
     color: white;
+    text-align: center;
+    margin-bottom: 20px;
 }
 
 /* Purple Number Circles */
@@ -115,11 +117,11 @@ h1 {
     display: inline-flex;
     justify-content: center;
     align-items: center;
-    background-color: #a020f0; /* Brighter Purple */
+    background-color: #a020f0;
     color: white;
     border-radius: 50%;
-    width: 38px;
-    height: 38px;
+    width: 40px;
+    height: 40px;
     font-size: 18px;
     font-weight: bold;
     margin-right: 10px;
@@ -131,7 +133,7 @@ h1 {
     font-weight: bold;
 }
 
-/* Purple Button */
+/* Purple Button that works in dark mode too */
 .purple-button button {
     background-color: #a020f0 !important;
     color: white !important;
@@ -139,27 +141,18 @@ h1 {
     font-size: 18px;
     padding: 12px 24px;
     border-radius: 8px;
-    transition: background 0.3s;
+    border: none !important;
+    transition: background 0.3s ease-in-out;
 }
 
 .purple-button button:hover {
-    background-color: #b84dff !important;
+    background-color: #c45eff !important;
 }
 """
 
-# --- Gradio Interface with Improved Layout ---
-with gr.Blocks(css=custom_css, title="🇨🇦 Intelligent KYC Document Verifier") as iface:
-    gr.Markdown(
-        """
-        # 🇨🇦 Intelligent KYC Document Verifier  
-        Upload a Canadian document and this AI agent will intelligently find and verify the address using:
-        - 🧠 LLM for extraction  
-        - 🔍 Semantic similarity  
-        - 📫 Canada Post API for validation  
-        
-        **⚠️ Privacy Warning:** This is a public demo. Do not upload real, sensitive documents.
-        """
-    )
+# --- Gradio Interface with Clean Title ---
+with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
+    gr.Markdown("# EZOFIS KYC Agent")
 
     with gr.Row():
         with gr.Column():
