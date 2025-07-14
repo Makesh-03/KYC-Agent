@@ -1,5 +1,4 @@
 import os
-import mimetypes
 import requests
 import gradio as gr
 from sentence_transformers import SentenceTransformer, util
@@ -9,18 +8,18 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain.chat_models import ChatOpenAI
 
-# --- Model and API Configuration ---
+# --- Config ---
 similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
-CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
 # --- Core Functions ---
 
 def extract_text_from_file(file_path):
-    mime_type, _ = mimetypes.guess_type(file_path)
-    if mime_type == "application/pdf":
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
         elements = partition_pdf(file_path)
-    elif mime_type and mime_type.startswith("image/"):
+    elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
         elements = partition_image(filename=file_path)
     else:
         raise ValueError("Unsupported file type. Please upload a PDF or image.")
@@ -104,7 +103,7 @@ def kyc_verify(file, expected_address, model_choice):
     except Exception as e:
         return {"error": str(e)}
 
-# --- Custom CSS for Styling ---
+# --- Custom CSS ---
 
 custom_css = """
 h1 {
@@ -156,7 +155,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             gr.Markdown("<span class='purple-circle'>1</span> **Upload Document**")
             file_input = gr.File(
                 label="Upload Passport or Bill (PDF or Image)",
-                file_types=["pdf", "image"]
+                file_types=[".pdf", ".png", ".jpg", ".jpeg", ".bmp"]
             )
         with gr.Column():
             gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
