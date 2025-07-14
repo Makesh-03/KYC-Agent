@@ -1,31 +1,18 @@
 import os
 import mimetypes
-import time
 import requests
 import gradio as gr
 from sentence_transformers import SentenceTransformer, util
 from unstructured.partition.pdf import partition_pdf
 from unstructured.partition.image import partition_image
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import ChatPromptTemplate
+from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
+from langchain.chat_models import ChatOpenAI
 
-# --- Load Models ---
-
+# --- Model and API Configuration ---
 similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
-
-# OpenRouter Mistral Setup
-openrouter_key = os.getenv("OPENROUTER_API_KEY")
-
-llm = ChatOpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=openrouter_key,
-    model="mistralai/mistral-7b-instruct",
-    temperature=0.2,
-    max_tokens=200
-)
-
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 # --- Core Functions ---
 
@@ -39,20 +26,31 @@ def extract_text_from_file(file_path):
         raise ValueError("Unsupported file type. Please upload a PDF or image.")
     return "\n".join([str(e) for e in elements])
 
-def extract_address_with_llm(text):
-    prompt = ChatPromptTemplate.from_template(
-        "You are an address extraction assistant. Extract only the full Canadian mailing address from the input text.\n"
-        "Return only the address on one line with no explanation.\n\n"
-        "Examples:\n"
-        "Input: 'BILL TO: 789 KING ST W, TORONTO, ON M5V 1M5 — Customer: Mark Jensen'\n"
-        "Output: 789 KING ST W, TORONTO, ON M5V 1M5\n"
-        "Input: 'Driver’s License Info: John Doe, 135 FRONT ST E TORONTO ON M5A 1E3, Class G'\n"
-        "Output: 135 FRONT ST E TORONTO ON M5A 1E3\n"
-        "Input: 'Mailing Address - 200 BLOOR ST W, TORONTO, ON, M5S 1T8'\n"
-        "Output: 200 BLOOR ST W, TORONTO, ON, M5S 1T8\n\n"
-        "Input: {document_text}\n"
-        "Output:"
+def get_llm(model_choice):
+    model_map = {
+        "Mistral": "openrouter/mistralai/mistral-7b-instruct",
+        "OpenAI": "openrouter/openai/gpt-4o"
+    }
+    if not OPENROUTER_API_KEY:
+        raise ValueError("OPENROUTER_API_KEY is not set.")
+    return ChatOpenAI(
+        temperature=0.2,
+        model_name=model_map[model_choice],
+        base_url="https://openrouter.ai/api/v1",
+        openai_api_key=OPENROUTER_API_KEY,
+        max_tokens=200,
     )
+
+def extract_address_with_llm(text, model_choice):
+    prompt = PromptTemplate(
+        template=(
+            "Extract the full Canadian mailing address from the following text. "
+            "Include street, city, province, and postal code.\n\n"
+            "Text: {document_text}\n\nAddress:"
+        ),
+        input_variables=["document_text"],
+    )
+    llm = get_llm(model_choice)
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"document_text": text})
     return result["text"].strip()
@@ -64,7 +62,7 @@ def semantic_match(extracted, expected, threshold=0.85):
 
 def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
-        return {"error": "CANADA_POST_API_KEY secret not set in Hugging Face Space settings."}
+        return {"error": "CANADA_POST_API_KEY secret not set."}
     url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
     response = requests.get(
         url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
@@ -72,50 +70,41 @@ def verify_with_canada_post(address):
     data = response.json()
     return len(data.get("Items", [])) > 0
 
-def kyc_verify(file, expected_address):
+def kyc_verify(file, expected_address, model_choice):
     if file is None:
         return {"error": "Please upload a document to verify."}
     try:
         results = {}
-        t0 = time.time()
 
-        # 1. Text Extraction
+        # Step 1: Text Extraction
         text = extract_text_from_file(file.name)
         if not text:
             return {"error": "Could not extract any text from the document."}
-        t1 = time.time()
-        results["text_extraction_time"] = round(t1 - t0, 2)
 
-        # 2. LLM Address Extraction
-        extracted_address = extract_address_with_llm(text)
+        # Step 2: LLM Address Extraction
+        extracted_address = extract_address_with_llm(text, model_choice)
         if not extracted_address:
             return {"error": "Could not find a valid address in the document."}
-        t2 = time.time()
-        results["llm_extraction_time"] = round(t2 - t1, 2)
 
-        # 3. Semantic Match
+        # Step 3: Semantic Match
         sim_score, sem_ok = semantic_match(extracted_address, expected_address)
-        t3 = time.time()
-        results["semantic_match_time"] = round(t3 - t2, 2)
 
-        # 4. Canada Post Validation
+        # Step 4: Canada Post API
         cp_ok = verify_with_canada_post(extracted_address)
-        t4 = time.time()
-        results["canada_post_time"] = round(t4 - t3, 2)
 
+        # Final Results
         results.update({
             "extracted_address": extracted_address,
             "semantic_similarity": round(sim_score, 3),
             "address_match": sem_ok,
             "canada_post_verified": cp_ok,
             "final_result": sem_ok and (cp_ok if cp_ok is not None else True),
-            "total_time": round(t4 - t0, 2),
         })
         return results
     except Exception as e:
         return {"error": str(e)}
 
-# --- CSS for UI ---
+# --- Custom CSS for Styling ---
 
 custom_css = """
 h1 {
@@ -157,7 +146,7 @@ h1 {
 }
 """
 
-# --- UI Layout ---
+# --- Gradio Interface ---
 
 with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
     gr.Markdown("# EZOFIS KYC Agent")
@@ -175,10 +164,17 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
                 label="Expected Address",
                 placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2"
             )
+        with gr.Column():
+            gr.Markdown("<span class='purple-circle'>3</span> **Select LLM Provider**")
+            model_choice = gr.Dropdown(
+                choices=["Mistral", "OpenAI"],
+                value="Mistral",
+                label="LLM Provider"
+            )
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>3</span> **KYC Verification Results**")
+            gr.Markdown("<span class='purple-circle'>4</span> **KYC Verification Results**")
             output_json = gr.JSON(label="Verification Output")
 
     with gr.Row():
@@ -186,7 +182,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
 
     verify_btn.click(
         fn=kyc_verify,
-        inputs=[file_input, expected_address],
+        inputs=[file_input, expected_address, model_choice],
         outputs=output_json
     )
 
