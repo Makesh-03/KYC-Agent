@@ -11,23 +11,19 @@ from langchain.chains import LLMChain
 
 # --- Model and API Configuration ---
 
-# Load sentence transformer model for semantic similarity
 similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# Load LLM for intelligent address extraction
 llm = HuggingFacePipeline.from_model_id(
     model_id="google/flan-t5-large",
     task="text2text-generation",
     pipeline_kwargs={"max_new_tokens": 100},
 )
 
-# Get Canada Post API key from environment
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
 # --- Core Functions ---
 
 def extract_text_from_file(file_path):
-    """Extracts raw text from a PDF or image file."""
     try:
         mime_type, _ = mimetypes.guess_type(file_path)
         if mime_type == "application/pdf":
@@ -46,7 +42,6 @@ def extract_text_from_file(file_path):
         raise e
 
 def extract_address_with_llm(text):
-    """Uses an LLM to intelligently extract the address from the text with a few-shot prompt."""
     prompt = PromptTemplate(
         template=(
             "Please extract the full Canadian mailing address from the following text. "
@@ -66,13 +61,11 @@ def extract_address_with_llm(text):
     return result["text"].strip()
 
 def semantic_match(extracted, expected, threshold=0.85):
-    """Calculates the semantic similarity between two addresses."""
     embeddings = similarity_model.encode([extracted, expected], convert_to_tensor=True)
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
     return sim.item(), sim.item() >= threshold
 
 def verify_with_canada_post(address):
-    """Verifies an address using the Canada Post AddressComplete API."""
     if not CANADA_POST_API_KEY:
         return {"error": "CANADA_POST_API_KEY secret not set in Hugging Face Space settings."}
     try:
@@ -86,28 +79,18 @@ def verify_with_canada_post(address):
         print(f"Canada Post API error: {e}")
         return False
 
-# --- Main KYC Verification Workflow ---
-
 def kyc_verify(file, expected_address):
-    """The main function that orchestrates the entire KYC verification process."""
     if file is None:
         return {"error": "Please upload a document to verify."}
     try:
-        # 1. Extract text from the uploaded document
         text = extract_text_from_file(file.name)
         if not text:
             return {"error": "Could not extract any text from the document."}
-
-        # 2. Use the LLM to intelligently find the address
         extracted_address = extract_address_with_llm(text)
         if not extracted_address:
             return {"error": "Could not find a valid address in the document."}
-
-        # 3. Perform semantic and Canada Post verifications
         sim_score, sem_ok = semantic_match(extracted_address, expected_address)
         cp_ok = verify_with_canada_post(extracted_address)
-
-        # 4. Compile and return the final result
         return {
             "extracted_address": extracted_address,
             "semantic_similarity": round(sim_score, 3),
@@ -118,36 +101,53 @@ def kyc_verify(file, expected_address):
     except Exception as e:
         return {"error": str(e)}
 
-# --- Custom CSS for Styling ---
+# --- Enhanced Custom CSS ---
 custom_css = """
-h1, .gr-textbox label, .gr-file label {
-    font-size: 20px !important;
-    font-weight: bold;
+/* Main Title */
+h1 {
+    font-size: 34px !important;
+    font-weight: 900 !important;
+    color: white;
 }
 
+/* Purple Number Circles */
 .purple-circle {
-    display: inline-block;
-    background-color: #6a0dad;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #a020f0; /* Brighter Purple */
     color: white;
     border-radius: 50%;
-    width: 28px;
-    height: 28px;
-    text-align: center;
-    line-height: 28px;
-    margin-right: 8px;
+    width: 38px;
+    height: 38px;
+    font-size: 18px;
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+/* Section Labels */
+.gr-textbox label, .gr-file label {
+    font-size: 18px !important;
     font-weight: bold;
 }
 
+/* Purple Button */
 .purple-button button {
-    background-color: #6a0dad !important;
+    background-color: #a020f0 !important;
     color: white !important;
     font-weight: bold;
-    font-size: 16px;
-    padding: 10px 16px;
+    font-size: 18px;
+    padding: 12px 24px;
+    border-radius: 8px;
+    transition: background 0.3s;
+}
+
+.purple-button button:hover {
+    background-color: #b84dff !important;
 }
 """
 
-# --- Gradio Interface with Layout and Styling ---
+# --- Gradio Interface with Improved Layout ---
 with gr.Blocks(css=custom_css, title="🇨🇦 Intelligent KYC Document Verifier") as iface:
     gr.Markdown(
         """
