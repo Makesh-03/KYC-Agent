@@ -12,3 +12,4 @@ pytesseract
 langchain
 langchain-huggingface
 langchain-community
+openai
