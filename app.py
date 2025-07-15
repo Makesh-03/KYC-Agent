@@ -15,6 +15,10 @@ similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
+# --- Helpers ---
+def filter_non_null_fields(data):
+    return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
+
 # --- Core Functions ---
 def extract_text_from_file(file_path):
     ext = os.path.splitext(file_path)[1].lower()
@@ -146,8 +150,8 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
         consistency_score, consistent = semantic_match(address1, address2)
         percent_score = int(round(consistency_score * 100))
 
-        kyc_fields_1 = extract_kyc_fields(text1, model_choice)
-        kyc_fields_2 = extract_kyc_fields(text2, model_choice)
+        kyc_fields_1 = filter_non_null_fields(extract_kyc_fields(text1, model_choice))
+        kyc_fields_2 = filter_non_null_fields(extract_kyc_fields(text2, model_choice))
 
         kyc_combined = {
             "first_document": kyc_fields_1,
@@ -179,7 +183,7 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
 
-# UI
+# --- UI ---
 custom_css = """
 .purple-small {
     background-color: #a020f0 !important;
@@ -190,7 +194,6 @@ custom_css = """
     border-radius: 6px !important;
     border: none !important;
 }
-
 h1 {
     font-size: 42px !important;
     font-weight: 900 !important;
