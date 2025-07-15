@@ -27,7 +27,7 @@ def extract_text_from_file(file_path):
 
 def get_llm(model_choice):
     model_map = {
-        "Mistral": "mistralai/mistral-8x7b-instruct",
+        "Mistral": "mistralai/Mistral-7B-Instruct-v0.2",
         "OpenAI": "openai/gpt-4o"
     }
     if not OPENROUTER_API_KEY:
@@ -128,6 +128,16 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
 
 # UI
 custom_css = """
+.purple-small {
+    background-color: #a020f0 !important;
+    color: white !important;
+    font-weight: bold !important;
+    font-size: 16px !important;
+    padding: 8px 20px !important;
+    border-radius: 6px !important;
+    border: none !important;
+}
+
 h1 {
     font-size: 42px !important;
     font-weight: 900 !important;
@@ -190,7 +200,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             model_choice = gr.Dropdown(
                 choices=["Mistral", "OpenAI"], value="Mistral", label="LLM Provider"
             )
-            verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-button")
+            verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
 
     with gr.Row():
         with gr.Column():
