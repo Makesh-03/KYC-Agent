@@ -155,6 +155,20 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
         }
 
         passed = all([match1, match2, verified1, verified2, consistent])
+        verification_result = {
+            "extracted_address_1": address1,
+            "extracted_address_2": address2,
+            "similarity_to_expected_1": round(sim1, 3),
+            "similarity_to_expected_2": round(sim2, 3),
+            "address_match_1": match1,
+            "address_match_2": match2,
+            "canada_post_verified_1": verified1,
+            "canada_post_verified_2": verified2,
+            "document_consistency_score": round(consistency_score, 3),
+            "documents_consistent": consistent,
+            "final_result": passed
+        }
+
         if passed:
             status = f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{percent_score}%</b>"
         else:
