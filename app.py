@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import requests
 import gradio as gr
 from sentence_transformers import SentenceTransformer, util
@@ -37,7 +38,7 @@ def get_llm(model_choice):
         model_name=model_map[model_choice],
         base_url="https://openrouter.ai/api/v1",
         openai_api_key=OPENROUTER_API_KEY,
-        max_tokens=200,
+        max_tokens=2000,
     )
 
 def clean_address_mistral(raw_response):
@@ -71,6 +72,48 @@ def extract_address_with_llm(text, model_choice):
 
     return clean_address_mistral(raw) if model_choice == "Mistral" else raw
 
+def extract_kyc_fields(text, model_choice):
+    prompt_text = """
+You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, driving license, national identity card, or any type of VISA document (including but not limited to tourist visas, work visas, student visas, resident visas, entry permits, e-visas, visa labels, or visa stamps). Use the visible field labels, visual structure, and document layout to capture the data, but do not invent fields or infer details that do not explicitly appear on the document. If any field is missing, set its value as null. Return ONLY the resulting JSON object (no explanation, no text before or after). Use this schema for the unified KYC data extraction:
+
+{
+  "document_type": "string or null",
+  "document_number": "string or null",
+  "country_of_issue": "string or null",
+  "issuing_authority": "string or null",
+  "full_name": "string or null",
+  "first_name": "string or null",
+  "middle_name": "string or null",
+  "last_name": "string or null",
+  "gender": "string or null",
+  "date_of_birth": "string or null",
+  "place_of_birth": "string or null",
+  "nationality": "string or null",
+  "address": "string or null",
+  "date_of_issue": "string or null",
+  "date_of_expiry": "string or null",
+  "blood_group": "string or null",
+  "personal_id_number": "string or null",
+  "father_name": "string or null",
+  "mother_name": "string or null",
+  "marital_status": "string or null",
+  "photo_base64": "string or null",
+  "signature_base64": "string or null",
+  "additional_info": "string or null"
+}
+
+Text:
+{text}
+"""
+    llm = get_llm(model_choice)
+    prompt = PromptTemplate(template=prompt_text, input_variables=["text"])
+    chain = LLMChain(llm=llm, prompt=prompt)
+    result = chain.invoke({"text": text})
+    try:
+        return json.loads(result["text"])
+    except:
+        return {"error": "Failed to parse KYC fields"}
+
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
@@ -88,7 +131,7 @@ def verify_with_canada_post(address):
 
 def kyc_dual_verify(file1, file2, expected_address, model_choice):
     if file1 is None or file2 is None:
-        return "❌ Verification Failed: Please upload both documents.", {}
+        return "❌ Verification Failed: Please upload both documents.", {}, {}
 
     try:
         text1 = extract_text_from_file(file1.name)
@@ -102,6 +145,8 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
         verified2 = verify_with_canada_post(address2)
         consistency_score, consistent = semantic_match(address1, address2)
         percent_score = int(round(consistency_score * 100))
+
+        kyc_fields = extract_kyc_fields(text1, model_choice)
 
         passed = all([match1, match2, verified1, verified2, consistent])
         if passed:
@@ -121,10 +166,10 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
             "document_consistency_score": round(consistency_score, 3),
             "documents_consistent": consistent,
             "final_result": passed
-        }
+        }, kyc_fields
 
     except Exception as e:
-        return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}
+        return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
 
 # UI
 custom_css = """
@@ -213,11 +258,14 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
                 output_json = gr.JSON(label="KYC Output")
+                with gr.Box():
+                    gr.Markdown("### \ud83d\udcc4 Extracted Document Details")
+                    document_info_json = gr.JSON(label="Document Fields")
 
     verify_btn.click(
         fn=kyc_dual_verify,
         inputs=[file_input_1, file_input_2, expected_address, model_choice],
-        outputs=[status_html, output_json]
+        outputs=[status_html, output_json, document_info_json]
     )
 
 if __name__ == "__main__":
