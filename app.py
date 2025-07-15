@@ -46,12 +46,19 @@ def get_llm(model_choice):
     )
 
 def clean_address_mistral(raw_response):
+    # Flatten line breaks
     flattened = raw_response.replace("\n", ", ").replace("  ", " ")
+
+    # Remove leading section numbers like "8.", "5)", "4-" etc.
+    flattened = re.sub(r"^\s*(\d+[\.\-\):]?)\s*", "", flattened)
+
+    # Extract valid Canadian address using known pattern
     match = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
         re.IGNORECASE,
     )
+
     return match.group(0).strip() if match else flattened.strip()
 
 def extract_address_with_llm(text, model_choice):
@@ -113,7 +120,8 @@ Text:
 {text}
 """
     llm = get_llm(model_choice)
-    prompt = PromptTemplate(template=prompt_text, input_variables=["text"])
+    # Use a PromptTemplate with template_format="f-string" to avoid curly brace parsing issues
+    prompt = PromptTemplate(template=prompt_text, input_variables=["text"], template_format="f-string")
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"text": text})
     raw_output = result["text"].strip()
@@ -121,7 +129,6 @@ Text:
     try:
         return json.loads(raw_output)
     except json.JSONDecodeError:
-        # Try to extract the JSON block from the output if extra text is present
         json_match = re.search(r'\{[\s\S]+\}', raw_output)
         if json_match:
             try:
