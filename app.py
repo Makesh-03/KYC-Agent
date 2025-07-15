@@ -17,7 +17,6 @@ CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
 # --- Helpers ---
 def filter_non_null_fields(data):
-    # Only return fields that are not null, "null", "", or "None"
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
 
 # --- Core Functions ---
@@ -46,21 +45,32 @@ def get_llm(model_choice):
         max_tokens=2000,
     )
 
-def clean_address_mistral(raw_response):
-    # Flatten line breaks
-    flattened = raw_response.replace("\n", ", ").replace("  ", " ")
+def clean_address_mistral(raw_response, original_text=""):
+    # Flatten and normalize text
+    flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
 
-    # Remove leading section numbers like "8.", "5)", "4-" etc.
+    # Remove leading section numbers like "15.", "8)", "2-"
     flattened = re.sub(r"^\s*(\d+[\.\-\):]?)\s*", "", flattened)
 
-    # Extract valid Canadian address using known pattern
+    # Try to extract valid Canadian address
     match = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
         re.IGNORECASE,
     )
+    if match:
+        return match.group(0).strip()
 
-    return match.group(0).strip() if match else flattened.strip()
+    # Fallback: try to extract from full OCR text
+    fallback = re.search(
+        r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
+        original_text.replace("\n", " "),
+        re.IGNORECASE,
+    )
+    if fallback:
+        return fallback.group(0).strip()
+
+    return flattened
 
 def extract_address_with_llm(text, model_choice):
     if model_choice == "Mistral":
@@ -85,13 +95,13 @@ def extract_address_with_llm(text, model_choice):
     result = chain.invoke({"document_text": text})
     raw = result["text"].strip()
 
-    return clean_address_mistral(raw) if model_choice == "Mistral" else raw
+    return clean_address_mistral(raw, original_text=text) if model_choice == "Mistral" else raw
 
 def extract_kyc_fields(text, model_choice):
     prompt_text = """
 You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, driving license, national identity card, or any type of VISA document (including but not limited to tourist visas, work visas, student visas, resident visas, entry permits, e-visas, visa labels, or visa stamps). Use the visible field labels, visual structure, and document layout to capture the data, but do not invent fields or infer details that do not explicitly appear on the document. If any field is missing, set its value as null. Return ONLY the resulting JSON object (no explanation, no text before or after). Use this schema for the unified KYC data extraction:
 
-{{
+{
   "document_type": "string or null",
   "document_number": "string or null",
   "country_of_issue": "string or null",
@@ -115,14 +125,13 @@ You are an expert KYC document parser. Extract all relevant information from the
   "photo_base64": "string or null",
   "signature_base64": "string or null",
   "additional_info": "string or null"
-}}
+}
 
 Text:
 {text}
 """
     llm = get_llm(model_choice)
-    # Use a PromptTemplate with template_format="f-string" to avoid curly brace parsing issues
-    prompt = PromptTemplate(template=prompt_text, input_variables=["text"], template_format="f-string")
+    prompt = PromptTemplate(template=prompt_text, input_variables=["text"])
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"text": text})
     raw_output = result["text"].strip()
@@ -171,7 +180,6 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
         consistency_score, consistent = semantic_match(address1, address2)
         percent_score = int(round(consistency_score * 100))
 
-        # Do not filter out null fields, show all fields
         kyc_fields_1 = filter_non_null_fields(extract_kyc_fields(text1, model_choice))
         kyc_fields_2 = filter_non_null_fields(extract_kyc_fields(text2, model_choice))
 
@@ -302,4 +310,4 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
     )
 
 if __name__ == "__main__":
-    iface.launch()
+    iface.launch(share=True)
