@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 import gradio as gr
 from sentence_transformers import SentenceTransformer, util
@@ -40,12 +41,20 @@ def get_llm(model_choice):
         max_tokens=200,
     )
 
+def clean_address(raw_response):
+    # Match common Canadian address pattern: number, street, city, province, postal code
+    match = re.search(
+        r"\d{1,5}[\s\w.,'-]+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard)?[, ]+\s*\w+[, ]+\s*[A-Z]{2}[, ]+\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
+        raw_response,
+        re.IGNORECASE
+    )
+    return match.group(0).strip() if match else raw_response.strip()
+
 def extract_address_with_llm(text, model_choice):
     if model_choice == "Mistral":
         template = (
             "ONLY return the full Canadian mailing address from the text below. "
-            "No notes, no commentary — return only the address. Format must include: "
-            "street number, street name, city, province, and postal code.\n\n"
+            "No notes or explanations. Include number, street, city, province, and postal code.\n\n"
             "Text: {document_text}\n\nAddress:"
         )
     else:
@@ -59,7 +68,12 @@ def extract_address_with_llm(text, model_choice):
     llm = get_llm(model_choice)
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"document_text": text})
-    return result["text"].strip()
+    raw_output = result["text"].strip()
+
+    # Apply regex cleaning only for Mistral
+    if model_choice == "Mistral":
+        return clean_address(raw_output)
+    return raw_output
 
 def semantic_match(extracted, expected, threshold=0.85):
     embeddings = similarity_model.encode([extracted, expected], convert_to_tensor=True)
