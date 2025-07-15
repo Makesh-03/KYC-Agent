@@ -46,29 +46,23 @@ def get_llm(model_choice):
     )
 
 def clean_address_mistral(raw_response, original_text=""):
-    # Flatten and normalize text
+    # Step 1: Normalize response
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
 
-    # Remove leading section numbers like "15.", "8)", "2-"
-    flattened = re.sub(r"^\s*(\d+[\.\-\):]?)\s*", "", flattened)
+    # Step 2: Remove common section numbering (e.g. "8.", "8.2)", "15-")
+    flattened = re.sub(r"^\s*(\d+(\.\d+)?[\.\-\):]?)\s*", "", flattened)
 
-    # Try to extract valid Canadian address
-    match = re.search(
-        r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
-        flattened,
-        re.IGNORECASE,
-    )
+    # Step 3: Canadian address pattern (must start with proper int, not float)
+    pattern = r"\b(?<!\d\.)(?<!\d,)(\d{1,5})[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d\b"
+
+    match = re.search(pattern, flattened)
     if match:
         return match.group(0).strip()
 
-    # Fallback: try to extract from full OCR text
-    fallback = re.search(
-        r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
-        original_text.replace("\n", " "),
-        re.IGNORECASE,
-    )
-    if fallback:
-        return fallback.group(0).strip()
+    # Step 4: Fallback from OCR full text
+    fallback_match = re.search(pattern, original_text.replace("\n", " "))
+    if fallback_match:
+        return fallback_match.group(0).strip()
 
     return flattened
 
