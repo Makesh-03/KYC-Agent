@@ -258,9 +258,8 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
                 output_json = gr.JSON(label="KYC Output")
-                with gr.Box():
-                    gr.Markdown("### \ud83d\udcc4 Extracted Document Details")
-                    document_info_json = gr.JSON(label="Document Fields")
+                gr.Markdown("### \ud83d\udcc4 Extracted Document Details")
+                document_info_json = gr.JSON(label="Document Fields")
 
     verify_btn.click(
         fn=kyc_dual_verify,
