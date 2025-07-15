@@ -17,7 +17,8 @@ CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
 # --- Helpers ---
 def filter_non_null_fields(data):
-    return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
+    # No longer filter out null fields; return as-is
+    return data
 
 # --- Core Functions ---
 def extract_text_from_file(file_path):
@@ -170,8 +171,9 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
         consistency_score, consistent = semantic_match(address1, address2)
         percent_score = int(round(consistency_score * 100))
 
-        kyc_fields_1 = filter_non_null_fields(extract_kyc_fields(text1, model_choice))
-        kyc_fields_2 = filter_non_null_fields(extract_kyc_fields(text2, model_choice))
+        # Do not filter out null fields, show all fields
+        kyc_fields_1 = extract_kyc_fields(text1, model_choice)
+        kyc_fields_2 = extract_kyc_fields(text2, model_choice)
 
         kyc_combined = {
             "first_document": kyc_fields_1,
@@ -300,4 +302,4 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
     )
 
 if __name__ == "__main__":
-    iface.launch(share=True)
+    iface.launch()
