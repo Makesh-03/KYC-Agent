@@ -17,8 +17,8 @@ CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
 # --- Helpers ---
 def filter_non_null_fields(data):
-    # No longer filter out null fields; return as-is
-    return data
+    # Only return fields that are not null, "null", "", or "None"
+    return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
 
 # --- Core Functions ---
 def extract_text_from_file(file_path):
@@ -172,8 +172,8 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
         percent_score = int(round(consistency_score * 100))
 
         # Do not filter out null fields, show all fields
-        kyc_fields_1 = extract_kyc_fields(text1, model_choice)
-        kyc_fields_2 = extract_kyc_fields(text2, model_choice)
+        kyc_fields_1 = filter_non_null_fields(extract_kyc_fields(text1, model_choice))
+        kyc_fields_2 = filter_non_null_fields(extract_kyc_fields(text2, model_choice))
 
         kyc_combined = {
             "first_document": kyc_fields_1,
