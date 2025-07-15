@@ -14,8 +14,7 @@ similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
-# --- Helper Functions ---
-
+# --- Core Functions ---
 def extract_text_from_file(file_path):
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".pdf":
@@ -28,7 +27,7 @@ def extract_text_from_file(file_path):
 
 def get_llm(model_choice):
     model_map = {
-        "Mistral": "mistralai/mixtral-8x7b-instruct",
+        "Mistral": "nousresearch/nous-capybara-7b",
         "OpenAI": "openai/gpt-4o"
     }
     if not OPENROUTER_API_KEY:
@@ -70,11 +69,9 @@ def extract_address_with_llm(text, model_choice):
     result = chain.invoke({"document_text": text})
     raw = result["text"].strip()
 
-    if model_choice == "Mistral":
-        return clean_address_mistral(raw)
-    return raw
+    return clean_address_mistral(raw) if model_choice == "Mistral" else raw
 
-def semantic_match(text1, text2, threshold=0.85):
+def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
     return sim.item(), sim.item() >= threshold
@@ -129,28 +126,83 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}
 
-# --- Gradio Interface (Simplified layout snippet) ---
+# UI
+custom_css = """
+h1 {
+    font-size: 42px !important;
+    font-weight: 900 !important;
+    color: white;
+    text-align: center;
+    margin-bottom: 20px;
+}
+.purple-circle {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #a020f0 !important;
+    color: white;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+    font-weight: bold;
+    margin-right: 10px;
+}
+.gr-textbox label, .gr-file label {
+    font-size: 18px !important;
+    font-weight: bold;
+}
+.purple-button button,
+.purple-button button:hover,
+.purple-button button:focus {
+    background-color: #a020f0 !important;
+    color: white !important;
+    font-weight: bold !important;
+    font-size: 16px !important;
+    padding: 10px 22px !important;
+    border-radius: 8px !important;
+    border: none !important;
+    box-shadow: none !important;
+    transition: background 0.3s ease-in-out;
+}
+"""
 
-with gr.Blocks(title="EZOFIS KYC Agent") as iface:
+with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
     gr.Markdown("# EZOFIS KYC Agent")
 
     with gr.Row():
-        file_input_1 = gr.File(label="📄 Document 1")
-        expected_address = gr.Textbox(label="🏠 Expected Address")
-
-    with gr.Row():
-        file_input_2 = gr.File(label="📄 Document 2")
         with gr.Column():
-            model_choice = gr.Dropdown(choices=["Mistral", "OpenAI"], value="Mistral", label="🤖 Model")
-            verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
+            gr.Markdown("<span class='purple-circle'>1</span> **Upload Document 1 (e.g., License)**")
+            file_input_1 = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="Document 1")
+        with gr.Column():
+            gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
+            expected_address = gr.Textbox(
+                label="Expected Address",
+                placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2"
+            )
 
     with gr.Row():
-        status_html = gr.HTML(label="✅ KYC Verification Status")
+        with gr.Column():
+            gr.Markdown("<span class='purple-circle'>3</span> **Upload Document 2 (e.g., Void Cheque)**")
+            file_input_2 = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="Document 2")
+        with gr.Column():
+            gr.Markdown("<span class='purple-circle'>4</span> **Select LLM Provider**")
+            model_choice = gr.Dropdown(
+                choices=["Mistral", "OpenAI"], value="Mistral", label="LLM Provider"
+            )
+            verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-button")
 
     with gr.Row():
-        details = gr.Accordion("View Full Verification Details", open=False)
-        with details:
-            output_json = gr.JSON(label="KYC Output")
+        with gr.Column():
+            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Status**")
+            status_html = gr.HTML()
+
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
+            details = gr.Accordion("View Full Verification Details", open=False)
+            with details:
+                output_json = gr.JSON(label="KYC Output")
 
     verify_btn.click(
         fn=kyc_dual_verify,
