@@ -146,7 +146,13 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
         consistency_score, consistent = semantic_match(address1, address2)
         percent_score = int(round(consistency_score * 100))
 
-        kyc_fields = extract_kyc_fields(text1, model_choice)
+        kyc_fields_1 = extract_kyc_fields(text1, model_choice)
+        kyc_fields_2 = extract_kyc_fields(text2, model_choice)
+
+        kyc_combined = {
+            "first_document": kyc_fields_1,
+            "second_document": kyc_fields_2
+        }
 
         passed = all([match1, match2, verified1, verified2, consistent])
         if passed:
@@ -154,19 +160,7 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
         else:
             status = f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{percent_score}%</b>"
 
-        return status, {
-            "extracted_address_1": address1,
-            "extracted_address_2": address2,
-            "similarity_to_expected_1": round(sim1, 3),
-            "similarity_to_expected_2": round(sim2, 3),
-            "address_match_1": match1,
-            "address_match_2": match2,
-            "canada_post_verified_1": verified1,
-            "canada_post_verified_2": verified2,
-            "document_consistency_score": round(consistency_score, 3),
-            "documents_consistent": consistent,
-            "final_result": passed
-        }, kyc_fields
+        return status, verification_result, kyc_combined
 
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
