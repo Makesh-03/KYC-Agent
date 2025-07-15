@@ -42,7 +42,6 @@ def get_llm(model_choice):
     )
 
 def clean_address(raw_response):
-    # Match common Canadian address pattern: number, street, city, province, postal code
     match = re.search(
         r"\d{1,5}[\s\w.,'-]+(?:St|Street|Ave|Avenue|Rd|Road|Blvd|Boulevard)?[, ]+\s*\w+[, ]+\s*[A-Z]{2}[, ]+\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         raw_response,
@@ -70,19 +69,16 @@ def extract_address_with_llm(text, model_choice):
     result = chain.invoke({"document_text": text})
     raw_output = result["text"].strip()
 
-    # Apply regex cleaning only for Mistral
-    if model_choice == "Mistral":
-        return clean_address(raw_output)
-    return raw_output
+    return clean_address(raw_output) if model_choice == "Mistral" else raw_output
 
-def semantic_match(extracted, expected, threshold=0.85):
-    embeddings = similarity_model.encode([extracted, expected], convert_to_tensor=True)
+def semantic_match(text1, text2, threshold=0.85):
+    embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
     return sim.item(), sim.item() >= threshold
 
 def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
-        return {"error": "CANADA_POST_API_KEY secret not set."}
+        return False
     url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
     response = requests.get(
         url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
@@ -90,37 +86,47 @@ def verify_with_canada_post(address):
     data = response.json()
     return len(data.get("Items", [])) > 0
 
-def kyc_verify(file, expected_address, model_choice):
-    if file is None:
-        return {"error": "Please upload a document to verify."}
+def kyc_dual_verify(file1, file2, expected_address, model_choice):
+    if file1 is None or file2 is None:
+        return {"error": "Please upload both address proof documents."}
+
     try:
-        results = {}
+        # Extract text from both files
+        text1 = extract_text_from_file(file1.name)
+        text2 = extract_text_from_file(file2.name)
 
-        # Step 1: Text Extraction
-        text = extract_text_from_file(file.name)
-        if not text:
-            return {"error": "Could not extract any text from the document."}
+        if not text1 or not text2:
+            return {"error": "Could not extract text from one or both documents."}
 
-        # Step 2: LLM Address Extraction
-        extracted_address = extract_address_with_llm(text, model_choice)
-        if not extracted_address:
-            return {"error": "Could not find a valid address in the document."}
+        # LLM address extraction
+        address1 = extract_address_with_llm(text1, model_choice)
+        address2 = extract_address_with_llm(text2, model_choice)
 
-        # Step 3: Semantic Match
-        sim_score, sem_ok = semantic_match(extracted_address, expected_address)
+        # Semantic match with expected address
+        sim1, match1 = semantic_match(address1, expected_address)
+        sim2, match2 = semantic_match(address2, expected_address)
 
-        # Step 4: Canada Post API
-        cp_ok = verify_with_canada_post(extracted_address)
+        # Verify with Canada Post
+        verified1 = verify_with_canada_post(address1)
+        verified2 = verify_with_canada_post(address2)
 
-        # Final Results
-        results.update({
-            "extracted_address": extracted_address,
-            "semantic_similarity": round(sim_score, 3),
-            "address_match": sem_ok,
-            "canada_post_verified": cp_ok,
-            "final_result": sem_ok and (cp_ok if cp_ok is not None else True),
-        })
-        return results
+        # Compare both extracted addresses
+        consistency_score, consistent = semantic_match(address1, address2)
+
+        return {
+            "extracted_address_1": address1,
+            "extracted_address_2": address2,
+            "similarity_to_expected_1": round(sim1, 3),
+            "similarity_to_expected_2": round(sim2, 3),
+            "address_match_1": match1,
+            "address_match_2": match2,
+            "canada_post_verified_1": verified1,
+            "canada_post_verified_2": verified2,
+            "document_consistency_score": round(consistency_score, 3),
+            "documents_consistent": consistent,
+            "final_result": match1 and match2 and verified1 and verified2 and consistent,
+        }
+
     except Exception as e:
         return {"error": str(e)}
 
@@ -173,19 +179,25 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>1</span> **Upload Document**")
-            file_input = gr.File(
-                label="Upload Passport or Bill (PDF or Image)",
+            gr.Markdown("<span class='purple-circle'>1</span> **Upload Document 1**")
+            file_input_1 = gr.File(
+                label="e.g., Driving License (PDF or Image)",
                 file_types=[".pdf", ".png", ".jpg", ".jpeg", ".bmp"]
             )
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
+            gr.Markdown("<span class='purple-circle'>2</span> **Upload Document 2**")
+            file_input_2 = gr.File(
+                label="e.g., Void Cheque (PDF or Image)",
+                file_types=[".pdf", ".png", ".jpg", ".jpeg", ".bmp"]
+            )
+        with gr.Column():
+            gr.Markdown("<span class='purple-circle'>3</span> **Enter Expected Address**")
             expected_address = gr.Textbox(
                 label="Expected Address",
                 placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2"
             )
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>3</span> **Select LLM Provider**")
+            gr.Markdown("<span class='purple-circle'>4</span> **Select LLM Provider**")
             model_choice = gr.Dropdown(
                 choices=["Mistral", "OpenAI"],
                 value="Mistral",
@@ -194,15 +206,15 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>4</span> **KYC Verification Results**")
+            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Results**")
             output_json = gr.JSON(label="Verification Output")
 
     with gr.Row():
         verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-button")
 
     verify_btn.click(
-        fn=kyc_verify,
-        inputs=[file_input, expected_address, model_choice],
+        fn=kyc_dual_verify,
+        inputs=[file_input_1, file_input_2, expected_address, model_choice],
         outputs=output_json
     )
 
