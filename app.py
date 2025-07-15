@@ -88,32 +88,34 @@ def verify_with_canada_post(address):
 
 def kyc_dual_verify(file1, file2, expected_address, model_choice):
     if file1 is None or file2 is None:
-        return {"error": "Please upload both address proof documents."}
+        return "❌ Verification Failed: Please upload both documents.", {}
 
     try:
-        # Extract text from both files
+        # Extract and process
         text1 = extract_text_from_file(file1.name)
         text2 = extract_text_from_file(file2.name)
-
-        if not text1 or not text2:
-            return {"error": "Could not extract text from one or both documents."}
-
-        # LLM address extraction
         address1 = extract_address_with_llm(text1, model_choice)
         address2 = extract_address_with_llm(text2, model_choice)
 
-        # Semantic match with expected address
         sim1, match1 = semantic_match(address1, expected_address)
         sim2, match2 = semantic_match(address2, expected_address)
 
-        # Verify with Canada Post
         verified1 = verify_with_canada_post(address1)
         verified2 = verify_with_canada_post(address2)
 
-        # Compare both extracted addresses
         consistency_score, consistent = semantic_match(address1, address2)
+        percent_score = int(round(consistency_score * 100))
 
-        return {
+        # Final condition
+        passed = all([match1, match2, verified1, verified2, consistent])
+
+        if passed:
+            status = f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{percent_score}%</b>"
+        else:
+            status = f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{percent_score}%</b>"
+
+        # Detailed result
+        detail = {
             "extracted_address_1": address1,
             "extracted_address_2": address2,
             "similarity_to_expected_1": round(sim1, 3),
@@ -124,11 +126,13 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
             "canada_post_verified_2": verified2,
             "document_consistency_score": round(consistency_score, 3),
             "documents_consistent": consistent,
-            "final_result": match1 and match2 and verified1 and verified2 and consistent,
+            "final_result": passed
         }
 
+        return status, detail
+
     except Exception as e:
-        return {"error": str(e)}
+        return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}
 
 # --- Custom CSS ---
 
@@ -157,18 +161,14 @@ h1 {
     font-size: 18px !important;
     font-weight: bold;
 }
-.purple-button button,
-.purple-button button:hover,
-.purple-button button:focus {
+.purple-small {
     background-color: #a020f0 !important;
     color: white !important;
     font-weight: bold !important;
-    font-size: 18px !important;
-    padding: 12px 24px !important;
-    border-radius: 8px !important;
+    font-size: 16px !important;
+    padding: 8px 20px !important;
+    border-radius: 6px !important;
     border: none !important;
-    box-shadow: none !important;
-    transition: background 0.3s ease-in-out;
 }
 """
 
@@ -179,43 +179,42 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>1</span> **Upload Document 1**")
-            file_input_1 = gr.File(
-                label="e.g., Driving License (PDF or Image)",
-                file_types=[".pdf", ".png", ".jpg", ".jpeg", ".bmp"]
-            )
+            file_input_1 = gr.File(label="📄 Upload Document 1 (e.g., Driving License)")
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>2</span> **Upload Document 2**")
-            file_input_2 = gr.File(
-                label="e.g., Void Cheque (PDF or Image)",
-                file_types=[".pdf", ".png", ".jpg", ".jpeg", ".bmp"]
-            )
-        with gr.Column():
-            gr.Markdown("<span class='purple-circle'>3</span> **Enter Expected Address**")
             expected_address = gr.Textbox(
-                label="Expected Address",
+                label="🏠 Enter Expected Address",
                 placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2"
             )
-        with gr.Column():
-            gr.Markdown("<span class='purple-circle'>4</span> **Select LLM Provider**")
-            model_choice = gr.Dropdown(
-                choices=["Mistral", "OpenAI"],
-                value="Mistral",
-                label="LLM Provider"
-            )
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Results**")
-            output_json = gr.JSON(label="Verification Output")
+            file_input_2 = gr.File(label="📄 Upload Document 2 (e.g., Void Cheque)")
+        with gr.Column():
+            with gr.Row():
+                model_choice = gr.Dropdown(
+                    choices=["Mistral", "OpenAI"],
+                    value="Mistral",
+                    label="🤖 Select LLM Provider"
+                )
+            with gr.Row():
+                verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
 
     with gr.Row():
-        verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-button")
+        with gr.Column():
+            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Status**")
+            status_html = gr.HTML(label="KYC Status")
+
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
+            details = gr.Accordion("Click to view full verification details", open=False)
+            with details:
+                output_json = gr.JSON(label="Verification Output")
 
     verify_btn.click(
         fn=kyc_dual_verify,
         inputs=[file_input_1, file_input_2, expected_address, model_choice],
-        outputs=output_json
+        outputs=[status_html, output_json]
     )
 
 if __name__ == "__main__":
