@@ -57,9 +57,12 @@ def clean_address_mistral(raw_response):
 def extract_address_with_llm(text, model_choice):
     if model_choice == "Mistral":
         template = (
-            "ONLY return the full Canadian mailing address from the text below. "
-            "No notes or explanations. Include number, street, city, province, and postal code.\n\n"
-            "Text: {document_text}\n\nAddress:"
+            "You are extracting address information from Canadian government-issued documents such as a driver’s license. "
+            "The address is usually clearly marked and contains house/building number, street, city, province, and postal code. "
+            "Ignore any unrelated information like class, eye color, or restrictions. "
+            "Do NOT return anything unless it's a complete Canadian mailing address. "
+            "Return ONLY the address in a single line, no explanation or label.\n\n"
+            "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
         template = (
@@ -80,7 +83,7 @@ def extract_kyc_fields(text, model_choice):
     prompt_text = """
 You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, driving license, national identity card, or any type of VISA document (including but not limited to tourist visas, work visas, student visas, resident visas, entry permits, e-visas, visa labels, or visa stamps). Use the visible field labels, visual structure, and document layout to capture the data, but do not invent fields or infer details that do not explicitly appear on the document. If any field is missing, set its value as null. Return ONLY the resulting JSON object (no explanation, no text before or after). Use this schema for the unified KYC data extraction:
 
-{{
+{
   "document_type": "string or null",
   "document_number": "string or null",
   "country_of_issue": "string or null",
@@ -104,7 +107,7 @@ You are an expert KYC document parser. Extract all relevant information from the
   "photo_base64": "string or null",
   "signature_base64": "string or null",
   "additional_info": "string or null"
-}}
+}
 
 Text:
 {text}
