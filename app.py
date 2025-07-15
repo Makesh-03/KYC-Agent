@@ -27,7 +27,7 @@ def extract_text_from_file(file_path):
 
 def get_llm(model_choice):
     model_map = {
-        "Mistral": "nousresearch/nous-capybara-7b",
+        "Mistral": "mistralai/mistral-8x7b-instruct",
         "OpenAI": "openai/gpt-4o"
     }
     if not OPENROUTER_API_KEY:
