@@ -52,8 +52,10 @@ def clean_address_mistral(raw_response, original_text=""):
     if re.match(r"(?i)(Sexe|Eyes|Class)", flattened):
         flattened = ""
 
-    pattern = r"\b(?<!\d\.)(\d{1,5})[\w\s.,'-]+?,\s*\w+,
-                \s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d\b"
+    # Fix: close the string literal for the regex pattern
+    pattern = (
+        r"\b(?<!\d\.)(\d{1,5})[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d\b"
+    )
 
     match = re.search(pattern, flattened)
     if match:
