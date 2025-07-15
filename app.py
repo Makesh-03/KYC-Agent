@@ -27,7 +27,7 @@ def extract_text_from_file(file_path):
 
 def get_llm(model_choice):
     model_map = {
-        "Mistral": "mistralai/mistral-7b-instruct",
+        "Mistral": "mistralai/mixtral-8x7b-instruct",
         "OpenAI": "openai/gpt-4o"
     }
     if not OPENROUTER_API_KEY:
@@ -41,14 +41,21 @@ def get_llm(model_choice):
     )
 
 def extract_address_with_llm(text, model_choice):
-    prompt = PromptTemplate(
-        template=(
+    if model_choice == "Mistral":
+        template = (
+            "ONLY return the full Canadian mailing address from the text below. "
+            "No notes, no commentary — return only the address. Format must include: "
+            "street number, street name, city, province, and postal code.\n\n"
+            "Text: {document_text}\n\nAddress:"
+        )
+    else:
+        template = (
             "Extract the full Canadian mailing address from the following text. "
             "Include street, city, province, and postal code.\n\n"
             "Text: {document_text}\n\nAddress:"
-        ),
-        input_variables=["document_text"],
-    )
+        )
+
+    prompt = PromptTemplate(template=template, input_variables=["document_text"])
     llm = get_llm(model_choice)
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"document_text": text})
