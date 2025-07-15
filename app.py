@@ -46,34 +46,33 @@ def get_llm(model_choice):
     )
 
 def clean_address_mistral(raw_response, original_text=""):
-    # Step 1: Normalize response
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
-
-    # Step 2: Remove common section numbering (e.g. "8.", "8.2)", "15-")
     flattened = re.sub(r"^\s*(\d+(\.\d+)?[\.\-\):]?)\s*", "", flattened)
 
-    # Step 3: Canadian address pattern (must start with proper int, not float)
-    pattern = r"\b(?<!\d\.)(?<!\d,)(\d{1,5})[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d\b"
+    if re.match(r"(?i)(Sexe|Eyes|Class)", flattened):
+        flattened = ""
+
+    pattern = r"\b(?<!\d\.)(\d{1,5})[\w\s.,'-]+?,\s*\w+,
+                \s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d\b"
 
     match = re.search(pattern, flattened)
     if match:
         return match.group(0).strip()
 
-    # Step 4: Fallback from OCR full text
     fallback_match = re.search(pattern, original_text.replace("\n", " "))
     if fallback_match:
         return fallback_match.group(0).strip()
 
-    return flattened
+    return "Address not found"
 
 def extract_address_with_llm(text, model_choice):
     if model_choice == "Mistral":
         template = (
-            "You are extracting address information from Canadian government-issued documents such as a driver’s license. "
-            "The address is usually clearly marked and contains house/building number, street, city, province, and postal code. "
-            "Ignore any unrelated information like class, eye color, or restrictions. "
-            "Do NOT return anything unless it's a complete Canadian mailing address. "
-            "Return ONLY the address in a single line, no explanation or label.\n\n"
+            "You are extracting address information from Canadian government-issued documents such as a driver\u2019s license. "
+            "The address usually includes a house number, street, city, province, and postal code. "
+            "Ignore unrelated fields like gender, class, height, eye color, license restrictions. "
+            "Do NOT include section numbers like 8, 15, or labels like 'Sexe' or 'Eyes'. "
+            "Return only the clean Canadian address. Do not explain anything.\n\n"
             "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
@@ -208,95 +207,27 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
 
-# --- UI ---
-custom_css = """
-.purple-small {
-    background-color: #a020f0 !important;
-    color: white !important;
-    font-weight: bold !important;
-    font-size: 16px !important;
-    padding: 8px 20px !important;
-    border-radius: 6px !important;
-    border: none !important;
-}
-h1 {
-    font-size: 42px !important;
-    font-weight: 900 !important;
-    color: white;
-    text-align: center;
-    margin-bottom: 20px;
-}
-.purple-circle {
-    display: inline-flex;
-    justify-content: center;
-    align-items: center;
-    background-color: #a020f0 !important;
-    color: white;
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    font-size: 18px;
-    font-weight: bold;
-    margin-right: 10px;
-}
-.gr-textbox label, .gr-file label {
-    font-size: 18px !important;
-    font-weight: bold;
-}
-.purple-button button,
-.purple-button button:hover,
-.purple-button button:focus {
-    background-color: #a020f0 !important;
-    color: white !important;
-    font-weight: bold !important;
-    font-size: 16px !important;
-    padding: 10px 22px !important;
-    border-radius: 8px !important;
-    border: none !important;
-    box-shadow: none !important;
-    transition: background 0.3s ease-in-out;
-}
-"""
 
-with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
+# --- UI ---
+with gr.Blocks(title="EZOFIS KYC Agent") as iface:
     gr.Markdown("# EZOFIS KYC Agent")
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>1</span> **Upload Document 1 (e.g., License)**")
-            file_input_1 = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="Document 1")
+            file_input_1 = gr.File(label="Upload Document 1", file_types=[".pdf", ".jpg", ".jpeg", ".png"])
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
-            expected_address = gr.Textbox(
-                label="Expected Address",
-                placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2"
-            )
+            expected_address = gr.Textbox(label="Expected Address")
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>3</span> **Upload Document 2 (e.g., Void Cheque)**")
-            file_input_2 = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="Document 2")
+            file_input_2 = gr.File(label="Upload Document 2", file_types=[".pdf", ".jpg", ".jpeg", ".png"])
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>4</span> **Select LLM Provider**")
-            model_choice = gr.Dropdown(
-                choices=["Mistral", "OpenAI"], value="Mistral", label="LLM Provider"
-            )
-            verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
+            model_choice = gr.Dropdown(choices=["Mistral", "OpenAI"], value="Mistral", label="LLM Provider")
+            verify_btn = gr.Button("🔍 Verify Now")
 
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Status**")
-            status_html = gr.HTML()
-
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
-            details = gr.Accordion("View Full Verification Details", open=False)
-            with details:
-                output_json = gr.JSON(label="KYC Output")
-                with gr.Group():
-                    gr.Markdown("### Extracted Document Details")
-                    document_info_json = gr.JSON(label="Document Fields")
+    status_html = gr.HTML()
+    output_json = gr.JSON(label="Verification Result")
+    document_info_json = gr.JSON(label="Extracted Document Fields")
 
     verify_btn.click(
         fn=kyc_dual_verify,
