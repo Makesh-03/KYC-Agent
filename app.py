@@ -50,8 +50,11 @@ def clean_address_mistral(raw_response, original_text=""):
     
     # Remove common misleading prefixes like "Section 8", "8.", "8.2)"
     flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d)?[\.\):]?\s*", "", flattened)
-
-    # Try primary address regex: Ensure it starts with a standalone number followed by street details
+    
+    # Remove any leading decimal-prefixed number if it appears as the first part
+    flattened = re.sub(r"^\d+\.\d+\s+", "", flattened)
+    
+    # Try primary address regex: Ensure it starts with a standalone number
     match = re.search(
         r"^\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
