@@ -139,80 +139,58 @@ Text:
     except Exception:
         json_match = re.search(r"\{[\s\S]+\}", raw_output)
         try:
-            return json.loads(json_match.group()) if json_match else {
-                "document_type": "Not provided",
-                "document_number": "Not provided",
-                "country_of_issue": "Not provided",
-                "issuing_authority": "Not provided",
-                "full_name": "Not provided",
-                "first_name": "Not provided",
-                "middle_name": "Not provided",
-                "last_name": "Not provided",
-                "gender": "Not provided",
-                "date_of_birth": "Not provided",
-                "place_of_birth": "Not provided",
-                "nationality": "Not provided",
-                "address": "Not provided",
-                "date_of_issue": "Not provided",
-                "date_of_expiry": "Not provided",
-                "blood_group": "Not provided",
-                "personal_id_number": "Not provided",
-                "father_name": "Not provided",
-                "mother_name": "Not provided",
-                "marital_status": "Not provided",
-                "photo_base64": "Not provided",
-                "signature_base64": "Not provided",
-                "additional_info": "Not provided",
-                "error": "No JSON block found",
-                "raw_output": raw_output
-            }
+            return json.loads(json_match.group()) if json_match else {}
         except Exception:
-            return {
-                "document_type": "Not provided",
-                "document_number": "Not provided",
-                "country_of_issue": "Not provided",
-                "issuing_authority": "Not provided",
-                "full_name": "Not provided",
-                "first_name": "Not provided",
-                "middle_name": "Not provided",
-                "last_name": "Not provided",
-                "gender": "Not provided",
-                "date_of_birth": "Not provided",
-                "place_of_birth": "Not provided",
-                "nationality": "Not provided",
-                "address": "Not provided",
-                "date_of_issue": "Not provided",
-                "date_of_expiry": "Not provided",
-                "blood_group": "Not provided",
-                "personal_id_number": "Not provided",
-                "father_name": "Not provided",
-                "mother_name": "Not provided",
-                "marital_status": "Not provided",
-                "photo_base64": "Not provided",
-                "signature_base64": "Not provided",
-                "additional_info": "Not provided",
-                "error": "Failed to parse KYC fields",
-                "raw_output": raw_output
-            }
+            return {}
 
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
     return sim.item(), sim.item() >= threshold
 
-# --- ONLY THIS FUNCTION CHANGED ---
+# --- ✅ Improved Canada Post Lookup ---
 def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
         return None
-    url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
-    response = requests.get(
-        url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
-    )
-    items = response.json().get("Items", [])
-    if not items:
-        return None
-    return items[0].get("Text", "").strip()
 
+    base_url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
+
+    def query_api(cleaned_text):
+        try:
+            response = requests.get(
+                base_url,
+                params={
+                    "Key": CANADA_POST_API_KEY,
+                    "Text": cleaned_text,
+                    "Country": "CAN"
+                },
+                timeout=5
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("Items", [])
+        except Exception as e:
+            print(f"Canada Post API error: {e}")
+            return []
+
+    variations = set()
+    variations.add(address)
+    variations.add(address.upper())
+    variations.add(address.lower())
+    variations.add(address.replace("’", "'"))
+    variations.add(re.sub(r"[’']", "", address))
+    variations.add(re.sub(r"[’']", " ", address))
+    variations.add(re.sub(r"\s+", " ", address.strip()))
+
+    for variant in variations:
+        results = query_api(variant)
+        for item in results:
+            if item.get("Text"):
+                return item["Text"].strip()
+
+    return None
+
+# --- ✅ Updated: fallback scoring logic
 def kyc_multi_verify(files, expected_address, model_choice):
     if not files or len(files) < 2:
         return "❌ Please upload at least two documents.", {}, {}
@@ -221,18 +199,24 @@ def kyc_multi_verify(files, expected_address, model_choice):
         kyc_fields = {}
         addresses = []
         authenticity_scores = []
+
         for idx, file in enumerate(files):
             text = extract_text_from_file(file.name)
             address = extract_address_with_llm(text, model_choice)
             sim, match = semantic_match(address, expected_address)
             verified_address = verify_with_canada_post(address)
-            authenticity_score = 0.0
+
             if verified_address:
                 sim_score, _ = semantic_match(address, verified_address)
-                authenticity_score = round(sim_score * 100, 2)
+            else:
+                sim_score, _ = semantic_match(address, expected_address)
+
+            authenticity_score = round(sim_score * 100, 2)
             authenticity_scores.append(authenticity_score)
+
             fields = extract_kyc_fields(text, model_choice)
             addresses.append(address)
+
             results[f"extracted_address_{idx+1}"] = address
             results[f"similarity_to_expected_{idx+1}"] = round(sim, 3)
             results[f"address_match_{idx+1}"] = match
