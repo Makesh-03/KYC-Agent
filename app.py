@@ -43,9 +43,11 @@ def get_llm(model_choice):
 
 def clean_address_mistral(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
-    flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d)?[\.\):])\s*)+", "", flattened)
-    flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d)?[\.\):]?\s*", "", flattened)
+    # Remove section numbers or dot-separated numbers (e.g., 8., 8.2) at the start
+    flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d+)?[\.\):])\s*)+", "", flattened)
+    flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d+)?[\.\):]?\s*", "", flattened)
     flattened = re.sub(r"^\d+\.\d+\s+", "", flattened)
+    # Match only standalone numbers (no dots) followed by street info
     match = re.search(
         r"^\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
@@ -53,8 +55,9 @@ def clean_address_mistral(raw_response, original_text=""):
     )
     if match:
         return match.group(0).strip()
+    # Fallback to original text with stricter pattern
     fallback = re.search(
-        r"^\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
+        r"^\d{1,5}(?![.\d])\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         original_text.replace("\n", " "),
         re.IGNORECASE,
     )
@@ -67,15 +70,15 @@ def extract_address_with_llm(text, model_choice):
         template = (
             "You are a strict document parser extracting Canadian addresses.\n\n"
             "Your task is to extract ONLY the full Canadian mailing address from the document text. The address must include:\n"
-            "- A house or building number (must be a standalone number like '2', '742', '38A', NOT a prefixed section number like '8.' or '8)')\n"
+            "- A house or building number (must be a standalone number like '2', '742', '38A', NOT a prefixed section number like '8.', '8.2', '8)', '9)') \n"
             "- Street name\n"
             "- City or town\n"
             "- Province (use two-letter code like ON, NL)\n"
             "- Postal code (format: A1A 1A1)\n\n"
             "**IMPORTANT RULES:**\n"
-            "- DO NOT include section numbers (e.g., '8.', '9., '8)', '9)') or labels like 'Eyes:', 'Class:', etc.\n"
-            "- Ignore any lines starting with numbers followed by a dot or parenthesis (e.g., '8.', '8.2', '9)') as these are section headers, not addresses."
-            "- The address should begin with the actual building number (e.g., '2 Thorburn Road')\n"
+            "- DO NOT include section numbers (e.g., '8.', '9.', '8.2', '8)', '9)') or labels like 'Eyes:', 'Class:', etc.\n"
+            "- Ignore any lines starting with numbers followed by a dot or parenthesis (e.g., '8.', '8.2', '9)') as these are section headers, not addresses.\n"
+            "- The address should begin with the actual building number (e.g., '2 Thorburn Road'), ensuring no dot-separated numbers (e.g., '8.2') are used as the building number.\n"
             "- Never assume or hallucinate building numbers like '8.2' if the actual number is just '2'.\n"
             "- If multiple addresses exist, pick the one that is clearly a Canadian residential or mailing address.\n\n"
             "Return ONLY the address in one line. No extra words, explanations, or labels.\n\n"
@@ -85,7 +88,7 @@ def extract_address_with_llm(text, model_choice):
     else:
         template = (
             "Extract the full Canadian mailing address from the following text. "
-            "Include street, city, province, and postal code.\n\n"
+            "Include street, city, province, and postal code. Ensure the building number is a standalone number (e.g., '2', not '8.2').\n\n"
             "Text: {document_text}\n\nAddress:"
         )
     prompt = PromptTemplate(template=template, input_variables=["document_text"])
