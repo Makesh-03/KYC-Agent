@@ -76,13 +76,8 @@ def extract_address_with_llm(text, model_choice):
             " Be very careful not to skip or omit the house/building number."
             " Ignore section numbers like '8.', '9.' and unrelated labels like 'Eyes:', 'Class:', or 'Sex:'."
             " Return only the complete address in a single line, no explanations or headings."
-            " Example format: 742 Evergreen Terrace, Ottawa, ON K1A 0B1
-
-"
-            "Text:
-{document_text}
-
-Extracted Address:"
+            " Example format: 742 Evergreen Terrace, Ottawa, ON K1A 0B1\n\n"
+            "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
         template = (
