@@ -71,12 +71,18 @@ def clean_address_mistral(raw_response, original_text=""):
 def extract_address_with_llm(text, model_choice):
     if model_choice == "Mistral":
         template = (
-            "You are extracting the full Canadian mailing address from a Canadian government-issued document such as a driver’s license or passport. "
-            "The address must contain all parts of a valid Canadian mailing address: a house/building number, street name, city, province (2-letter code), and a valid 6-character postal code in the A1A 1A1 format. "
-            "Do not skip or omit the house/building number. Do not return any section numbers, headings, or irrelevant content. "
-            "Only return the full address as a single line, with commas separating each part. Do not explain anything. "
-            "Example format: 221 King Street West, Toronto, ON M5H 1K5\n\n"
-            "Text:\n{document_text}\n\nExtracted Address:"
+            "You are an expert information extractor. Your task is to identify and extract ONLY the full Canadian mailing address from official government-issued identity documents such as a driver's license or passport."
+            " The address must include: house/building number, street name, city, province (2-letter abbreviation), and a postal code (A1A 1A1)."
+            " Be very careful not to skip or omit the house/building number."
+            " Ignore section numbers like '8.', '9.' and unrelated labels like 'Eyes:', 'Class:', or 'Sex:'."
+            " Return only the complete address in a single line, no explanations or headings."
+            " Example format: 742 Evergreen Terrace, Ottawa, ON K1A 0B1
+
+"
+            "Text:
+{document_text}
+
+Extracted Address:"
         )
     else:
         template = (
@@ -171,8 +177,12 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
         verified2 = verify_with_canada_post(address2)
         consistency_score, consistent = semantic_match(address1, address2)
         percent_score = int(round(consistency_score * 100))
-        kyc_fields_1 = filter_non_null_fields(extract_kyc_fields(text1, model_choice, extracted_address_1=address1))
-        kyc_fields_2 = filter_non_null_fields(extract_kyc_fields(text2, model_choice, extracted_address_1=address2))
+        kyc_fields_1 = filter_non_null_fields(
+            extract_kyc_fields(text1, model_choice, extracted_address_1=address1)
+        )
+        kyc_fields_2 = filter_non_null_fields(
+            extract_kyc_fields(text2, model_choice, extracted_address_1=address2)
+        )
         kyc_combined = {
             "first_document": kyc_fields_1,
             "second_document": kyc_fields_2
@@ -192,13 +202,16 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
             "final_result": passed
         }
         if passed:
-            status = f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{percent_score}%</b>"
+            status = (
+                f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{percent_score}%</b>"
+            )
         else:
-            status = f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{percent_score}%</b>"
+            status = (
+                f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{percent_score}%</b>"
+            )
         return status, verification_result, kyc_combined
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
-
 
 # --- UI ---
 custom_css = """
