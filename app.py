@@ -1,5 +1,7 @@
 # Full updated KYC Agent with Canada Post Authenticity Score
 
+# Full updated KYC Agent with Canada Post Authenticity Score (House Number Fix)
+
 import os
 import re
 import json
@@ -44,7 +46,8 @@ def get_llm(model_choice="OpenAI"):
 
 def clean_extracted_address(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
-    flattened = re.sub(r"^\s*(\d+[\.\-\):]?)\s*", "", flattened)
+    # FIXED: avoid stripping valid house numbers
+    flattened = re.sub(r"^\s*[\•\-–—]?\s*", "", flattened)
 
     match = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
@@ -67,9 +70,9 @@ def clean_extracted_address(raw_response, original_text=""):
 def extract_address_with_llm(text, model_choice="OpenAI"):
     template = (
         "Extract the full Canadian residential address from the scanned document text. "
-        "Include only the house number, street name, city, province (2-letter code), and postal code. "
-        "Do not make up or guess any part. Use digits as-is. Avoid decimals. "
-        "Example: 145 BAY STREET TORONTO, ON M5J 2R7\n\n"
+        "Include the house number (don't skip it), street name, city, province (2-letter code), and postal code. "
+        "Use only information present in the text. Do not guess or omit digits. Avoid hallucination. "
+        "Format: 145 BAY STREET TORONTO, ON M5J 2R7\n\n"
         "Text:\n{document_text}\n\nExtracted Address:"
     )
     prompt = PromptTemplate(template=template, input_variables=["document_text"])
@@ -84,7 +87,7 @@ def extract_kyc_fields(text, model_choice="OpenAI"):
     prompt_text = """
 You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, license, visa, etc. Return ONLY the resulting JSON object. If any field is missing, set it as null.
 
-{
+{{
   "document_type": "string or null",
   "document_number": "string or null",
   "country_of_issue": "string or null",
@@ -108,7 +111,7 @@ You are an expert KYC document parser. Extract all relevant information from the
   "photo_base64": "string or null",
   "signature_base64": "string or null",
   "additional_info": "string or null"
-}
+}}
 
 Text:
 {text}
@@ -119,17 +122,54 @@ Text:
     result = chain.invoke({"text": text})
     raw_output = result["text"].strip()
 
+    # Try to extract JSON from the LLM output robustly
     try:
         return json.loads(raw_output)
     except json.JSONDecodeError:
+        # Try to extract the first JSON object from the output, ignoring any leading/trailing text
         json_match = re.search(r'\{[\s\S]+\}', raw_output)
         if json_match:
             try:
                 return json.loads(json_match.group())
-            except:
-                return {"error": "Failed to parse cleaned JSON block"}
-        else:
-            return {"error": "No JSON block found in response"}
+            except Exception:
+                pass
+        # Try to fix common LLM output issues: remove lines before the first '{' and after the last '}'
+        start = raw_output.find('{')
+        end = raw_output.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            json_str = raw_output[start:end+1]
+            try:
+                return json.loads(json_str)
+            except Exception:
+                pass
+        # Always return all fields (with null) if parsing fails
+        return {
+            "document_type": None,
+            "document_number": None,
+            "country_of_issue": None,
+            "issuing_authority": None,
+            "full_name": None,
+            "first_name": None,
+            "middle_name": None,
+            "last_name": None,
+            "gender": None,
+            "date_of_birth": None,
+            "place_of_birth": None,
+            "nationality": None,
+            "address": None,
+            "date_of_issue": None,
+            "date_of_expiry": None,
+            "blood_group": None,
+            "personal_id_number": None,
+            "father_name": None,
+            "mother_name": None,
+            "marital_status": None,
+            "photo_base64": None,
+            "signature_base64": None,
+            "additional_info": None,
+            "error": "Failed to parse KYC fields",
+            "raw_output": raw_output
+        }
 
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
