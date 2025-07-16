@@ -75,13 +75,8 @@ def extract_address_with_llm(text, model_choice):
             "The address must contain all parts of a valid Canadian mailing address: a house/building number, street name, city, province (2-letter code), and a valid 6-character postal code in the A1A 1A1 format. "
             "Do not skip or omit the house/building number. Do not return any section numbers, headings, or irrelevant content. "
             "Only return the full address as a single line, with commas separating each part. Do not explain anything. "
-            "Example format: 221 King Street West, Toronto, ON M5H 1K5
-
-"
-            "Text:
-{document_text}
-
-Extracted Address:"
+            "Example format: 221 King Street West, Toronto, ON M5H 1K5\n\n"
+            "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
         template = (
