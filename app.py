@@ -83,6 +83,7 @@ def extract_address_with_llm(text, model_choice):
             "- Postal code (format: A1A 1A1)\n\n"
             "**IMPORTANT RULES:**\n"
             "- DO NOT include section numbers (e.g., '8.', '9.', '8)', '9)') or labels like 'Eyes:', 'Class:', etc.\n"
+            "- Ignore any lines starting with numbers followed by a dot or parenthesis (e.g., '8.', '8.2', '9)') as these are section headers, not addresses."
             "- The address should begin with the actual building number (e.g., '2 Thorburn Road')\n"
             "- Never assume or hallucinate building numbers like '8.2' if the actual number is just '2'.\n"
             "- If multiple addresses exist, pick the one that is clearly a Canadian residential or mailing address.\n\n"
