@@ -38,7 +38,7 @@ def extract_text_from_file(file_path):
     # DEBUG: print extracted text to diagnose missing numbers
     print(f"\n--- Extracted Text from {file_path} ---\n{text}\n----------------------------\n")
 
-    return text"\n".join([str(e) for e in elements])
+    return text
 
 def get_llm(model_choice="OpenAI"):
     if not OPENROUTER_API_KEY:
