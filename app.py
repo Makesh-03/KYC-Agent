@@ -20,14 +20,18 @@ def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
 
 def extract_text_from_file(file_path):
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext == ".pdf":
-        elements = partition_pdf(file_path)
-    elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
-        elements = partition_image(filename=file_path)
-    else:
-        raise ValueError("Unsupported file type. Please upload a PDF or image.")
-    return "\n".join([str(e) for e in elements])
+    try:
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == ".pdf":
+            elements = partition_pdf(file_path)
+        elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
+            elements = partition_image(filename=file_path)
+        else:
+            raise ValueError("Unsupported file type. Please upload a PDF or image.")
+        return "\n".join([str(e) for e in elements])
+    except Exception as e:
+        print(f"❌ Error extracting text: {e}")
+        return "❌ Error: Unable to extract text. Please check your file and environment."
 
 def get_llm(model_choice):
     model_map = {
@@ -47,15 +51,17 @@ def get_llm(model_choice):
 def clean_address_mistral(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
     flattened = re.sub(r"^\s*(\d+[\.\-\):]?)\s*", "", flattened)
+
     match = re.search(
-        r"\b\d{1,5}\s+[A-Za-z0-9\s.,'-]+?,\s*\w+\s*,\s*[A-Z]{2}\s*,?\s*[A-Z]\d[A-Z]\s?\d[A-Z]\d\b",
+        r"\d{1,5}(?:[.\-]?\d+)?[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
         re.IGNORECASE,
     )
     if match:
         return match.group(0).strip()
+
     fallback = re.search(
-        r"\b\d{1,5}\s+[A-Za-z0-9\s.,'-]+?,\s*\w+\s*,\s*[A-Z]{2}\s*,?\s*[A-Z]\d[A-Z]\s?\d[A-Z]\d\b",
+        r"\d{1,5}(?:[.\-]?\d+)?[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         original_text.replace("\n", " "),
         re.IGNORECASE,
     )
@@ -66,12 +72,18 @@ def clean_address_mistral(raw_response, original_text=""):
 def extract_address_with_llm(text, model_choice):
     if model_choice == "Mistral":
         template = (
-            "You are an expert information extractor. Your task is to identify and extract ONLY the full Canadian mailing address from official government-issued identity documents such as a driver's license or passport."
-            " The address must include: house/building number, street name, city, province (2-letter abbreviation), and a postal code (A1A 1A1)."
-            " Be very careful not to skip or omit the house/building number."
-            " Ignore section numbers like '8.', '9.' and unrelated labels like 'Eyes:', 'Class:', or 'Sex:'."
-            " Return only the complete address in a single line, no explanations or headings."
-            " Example format: 742 Evergreen Terrace, Ottawa, ON K1A 0B1\n\n"
+            "You are an expert information extractor. Your task is to extract ONLY the full Canadian mailing address "
+            "from official government-issued identity documents such as a driver’s license, passport, or utility bill. "
+            "The address must include:\n"
+            "- House or building number (e.g., 2, 742, 8.2)\n"
+            "- Street name\n"
+            "- City\n"
+            "- Province (e.g., ON, NL)\n"
+            "- Postal code (format: A1A 1A1)\n\n"
+            "⚠️ Do NOT skip the house/building number.\n"
+            "⚠️ Ignore section labels like '8.', '9.', 'Eyes:', 'Class:', etc.\n"
+            "✅ Return only the full address in one line. No explanation, no labels.\n"
+            "✅ Example output: 742 Evergreen Terrace, Ottawa, ON K1A 0B1\n\n"
             "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
@@ -89,7 +101,7 @@ def extract_address_with_llm(text, model_choice):
 
 def extract_kyc_fields(text, model_choice, extracted_address_1=None):
     prompt_text = """
-You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, driving license, national identity card, or any type of VISA document. Return ONLY the resulting JSON object:
+You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, driving license, national identity card, or any type of VISA document. Return ONLY the resulting JSON object (no explanation). Use this schema:
 
 {{
   "document_type": "string or null",
@@ -132,7 +144,6 @@ Text:
         try:
             kyc_output = json.loads(json_match.group()) if json_match else {"error": "No JSON block found"}
         except Exception:
-            # Always return all fields (with null) if parsing fails
             kyc_output = {
                 "document_type": None,
                 "document_number": None,
@@ -162,7 +173,7 @@ Text:
             }
     if "address" in kyc_output:
         addr = kyc_output["address"]
-        if len(addr) < 10 or re.search(r"(Eyes|Sex|Height|Classe|\d+\.)", addr, re.IGNORECASE):
+        if not addr or len(str(addr)) < 10 or re.search(r"(Eyes|Sex|Height|Classe|\d+\.)", str(addr), re.IGNORECASE):
             kyc_output["address"] = extracted_address_1
     return kyc_output
 
@@ -183,42 +194,48 @@ def verify_with_canada_post(address):
 
 def kyc_multi_verify(files, expected_address, model_choice):
     if not files or len(files) < 2:
-        return "❌ Verification Failed: Please upload at least two documents.", {}, {}
+        return "❌ Upload at least 2 documents.", {}, {}
     try:
-        addresses = []
-        texts = [extract_text_from_file(f.name) for f in files]
-        for text in texts:
+        addresses, fields, sims, matches, verifications = [], [], [], [], []
+        for file in files:
+            text = extract_text_from_file(file.name)
             addr = extract_address_with_llm(text, model_choice)
+            kyc = filter_non_null_fields(extract_kyc_fields(text, model_choice))
+            sim, matched = semantic_match(addr, expected_address)
+            verified = verify_with_canada_post(addr)
             addresses.append(addr)
-        matches = [semantic_match(addr, expected_address) for addr in addresses]
-        canada_verified = [verify_with_canada_post(addr) for addr in addresses]
-        consistency_scores = [
-            semantic_match(addresses[i], addresses[j])[0]
-            for i in range(len(addresses))
-            for j in range(i + 1, len(addresses))
-        ]
-        min_consistency = min(consistency_scores)
-        consistent = all(score >= 0.82 for score in consistency_scores)
-        percent_score = int(round(min_consistency * 100))
-        kyc_docs = [filter_non_null_fields(extract_kyc_fields(texts[i], model_choice, extracted_address_1=addresses[i])) for i in range(len(files))]
-        kyc_combined = {f"document_{i+1}": k for i, k in enumerate(kyc_docs)}
-        passed = all(m[1] for m in matches) and all(canada_verified) and consistent
+            sims.append(round(sim, 3))
+            matches.append(matched)
+            verifications.append(verified)
+            fields.append(kyc)
+
+        consistency_score, documents_consistent = semantic_match(addresses[0], addresses[1])
+        final_result = all(matches) and all(verifications) and documents_consistent
         verification_result = {
-            **{f"extracted_address_{i+1}": addr for i, addr in enumerate(addresses)},
-            **{f"similarity_to_expected_{i+1}": round(m[0], 3) for i, m in enumerate(matches)},
-            **{f"address_match_{i+1}": m[1] for i, m in enumerate(matches)},
-            **{f"canada_post_verified_{i+1}": v for i, v in enumerate(canada_verified)},
-            "document_consistency_score": round(min_consistency, 3),
-            "documents_consistent": consistent,
-            "final_result": passed
+            f"extracted_address_{i+1}": addresses[i] for i in range(len(addresses))
         }
-        if passed:
-            status = f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{percent_score}%</b>"
-        else:
-            status = f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{percent_score}%</b>"
+        verification_result.update({
+            f"similarity_to_expected_{i+1}": sims[i] for i in range(len(addresses))
+        })
+        verification_result.update({
+            f"address_match_{i+1}": matches[i] for i in range(len(addresses))
+        })
+        verification_result.update({
+            f"canada_post_verified_{i+1}": verifications[i] for i in range(len(addresses))
+        })
+        verification_result["document_consistency_score"] = round(consistency_score, 3)
+        verification_result["documents_consistent"] = documents_consistent
+        verification_result["final_result"] = final_result
+
+        kyc_combined = {f"document_{i+1}": fields[i] for i in range(len(fields))}
+        status = (
+            f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(consistency_score*100)}%</b>"
+            if final_result else
+            f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(consistency_score*100)}%</b>"
+        )
         return status, verification_result, kyc_combined
     except Exception as e:
-        return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
+        return f"❌ Error: {str(e)}", {}, {}
 
 # --- UI ---
 custom_css = """
