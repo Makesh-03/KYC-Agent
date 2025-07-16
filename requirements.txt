@@ -13,6 +13,7 @@ langchain
 langchain-huggingface
 langchain-community
 openai
+PyMuPDF
 
 # Note: The error is not related to missing packages.
 # It is due to an invalid model ID in your code or API call.
