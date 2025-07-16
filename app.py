@@ -42,19 +42,10 @@ def get_llm(model_choice):
     )
 
 def clean_address_mistral(raw_response, original_text=""):
-    # Flatten and clean up initial formatting
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
-    
-    # Remove section prefixes like '8.', '8.2', '8)', '9:', etc. from the beginning
     flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d)?[\.\):])\s*)+", "", flattened)
-    
-    # Remove common misleading prefixes like "Section 8", "8.", "8.2)"
     flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d)?[\.\):]?\s*", "", flattened)
-    
-    # Remove any leading decimal-prefixed number if it appears as the first part
     flattened = re.sub(r"^\d+\.\d+\s+", "", flattened)
-    
-    # Try primary address regex: Ensure it starts with a standalone number
     match = re.search(
         r"^\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
@@ -62,8 +53,6 @@ def clean_address_mistral(raw_response, original_text=""):
     )
     if match:
         return match.group(0).strip()
-
-    # Fallback: use original text with stricter address pattern
     fallback = re.search(
         r"^\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         original_text.replace("\n", " "),
@@ -71,7 +60,6 @@ def clean_address_mistral(raw_response, original_text=""):
     )
     if fallback:
         return fallback.group(0).strip()
-
     return flattened
 
 def extract_address_with_llm(text, model_choice):
@@ -206,6 +194,7 @@ Text:
                 "error": "Failed to parse KYC fields",
                 "raw_output": raw_output
             }
+
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
@@ -213,12 +202,17 @@ def semantic_match(text1, text2, threshold=0.82):
 
 def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
-        return False
+        return False, "No API key provided"
     url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
     response = requests.get(
         url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
     )
-    return len(response.json().get("Items", [])) > 0
+    items = response.json().get("Items", [])
+    if items:
+        # Use the first matched address as the verified address
+        verified_address = items[0].get("Text", address)
+        return True, verified_address
+    return False, address
 
 def kyc_multi_verify(files, expected_address, model_choice):
     if not files or len(files) < 2:
@@ -227,28 +221,35 @@ def kyc_multi_verify(files, expected_address, model_choice):
         results = {}
         kyc_fields = {}
         addresses = []
+        authenticity_scores = []
         for idx, file in enumerate(files):
             text = extract_text_from_file(file.name)
             address = extract_address_with_llm(text, model_choice)
             sim, match = semantic_match(address, expected_address)
-            verified = verify_with_canada_post(address)
+            verified, canada_post_address = verify_with_canada_post(address)
+            # Calculate authenticity score based on similarity to Canada Post address
+            auth_score, _ = semantic_match(address, canada_post_address)
+            authenticity_scores.append(auth_score)
             fields = extract_kyc_fields(text, model_choice)
             addresses.append(address)
             results[f"extracted_address_{idx+1}"] = address
             results[f"similarity_to_expected_{idx+1}"] = round(sim, 3)
             results[f"address_match_{idx+1}"] = match
             results[f"canada_post_verified_{idx+1}"] = verified
+            results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
             kyc_fields[f"document_{idx+1}"] = filter_non_null_fields(fields)
 
         consistency_score, consistent = semantic_match(addresses[0], addresses[1])
+        avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
         results["document_consistency_score"] = round(consistency_score, 3)
         results["documents_consistent"] = consistent
+        results["average_authenticity_score"] = round(avg_authenticity_score, 3)
         results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and consistent
 
         status = (
-            f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b>"
+            f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
             if results["final_result"]
-            else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b>"
+            else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
         return status, results, kyc_fields
     except Exception as e:
@@ -331,4 +332,3 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
 
 if __name__ == "__main__":
     iface.launch(share=True)
-
