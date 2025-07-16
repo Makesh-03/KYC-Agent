@@ -98,7 +98,7 @@ def extract_kyc_fields(text, model_choice="OpenAI"):
     prompt_text = """
 You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, license, visa, etc. Return ONLY the resulting JSON object. If any field is missing, set it as null.
 
-{
+{{
   "document_type": "string or null",
   "document_number": "string or null",
   "country_of_issue": "string or null",
@@ -122,7 +122,7 @@ You are an expert KYC document parser. Extract all relevant information from the
   "photo_base64": "string or null",
   "signature_base64": "string or null",
   "additional_info": "string or null"
-}
+}}
 
 Text:
 {text}
@@ -148,6 +148,7 @@ Text:
                 return json.loads(raw_output[start:end+1])
             except Exception:
                 pass
+        # Always return all fields (with null) if parsing fails
         return {
             "document_type": None,
             "document_number": None,
