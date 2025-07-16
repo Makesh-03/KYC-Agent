@@ -2,6 +2,8 @@
 
 # Full updated KYC Agent with Canada Post Authenticity Score (Anti-Hallucination Fix + Similarity Strictness Slider)
 
+# Full updated KYC Agent with Canada Post Authenticity Score (Anti-Hallucination Fix + Similarity Strictness Slider)
+
 import os
 import re
 import json
@@ -32,11 +34,15 @@ def extract_text_from_file(file_path):
     else:
         raise ValueError("Unsupported file type. Please upload a PDF or image.")
 
-    # Corrected: join lines and print for debug
-    text = "\n".join([str(e) for e in elements])
+    text = "
+".join([str(e) for e in elements])
 
     # DEBUG: print extracted text to diagnose missing numbers
-    print(f"\n--- Extracted Text from {file_path} ---\n{text}\n----------------------------\n")
+    print(f"
+--- Extracted Text from {file_path} ---
+{text}
+----------------------------
+")
 
     return text
 
