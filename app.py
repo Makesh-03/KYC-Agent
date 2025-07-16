@@ -42,10 +42,19 @@ def get_llm(model_choice):
     )
 
 def clean_address_mistral(raw_response, original_text=""):
+    # Flatten and clean up initial formatting
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
+    
+    # Remove section prefixes like '8.', '8.2', '8)', '9:', etc. from the beginning
     flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d)?[\.\):])\s*)+", "", flattened)
+    
+    # Remove common misleading prefixes like "Section 8", "8.", "8.2)"
     flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d)?[\.\):]?\s*", "", flattened)
+    
+    # Remove any leading decimal-prefixed number if it appears as the first part
     flattened = re.sub(r"^\d+\.\d+\s+", "", flattened)
+    
+    # Try primary address regex: Ensure it starts with a standalone number
     match = re.search(
         r"^\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
@@ -53,6 +62,8 @@ def clean_address_mistral(raw_response, original_text=""):
     )
     if match:
         return match.group(0).strip()
+
+    # Fallback: use original text with stricter address pattern
     fallback = re.search(
         r"^\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         original_text.replace("\n", " "),
@@ -60,6 +71,7 @@ def clean_address_mistral(raw_response, original_text=""):
     )
     if fallback:
         return fallback.group(0).strip()
+
     return flattened
 
 def extract_address_with_llm(text, model_choice):
@@ -139,58 +151,75 @@ Text:
     except Exception:
         json_match = re.search(r"\{[\s\S]+\}", raw_output)
         try:
-            return json.loads(json_match.group()) if json_match else {}
+            return json.loads(json_match.group()) if json_match else {
+                "document_type": "Not provided",
+                "document_number": "Not provided",
+                "country_of_issue": "Not provided",
+                "issuing_authority": "Not provided",
+                "full_name": "Not provided",
+                "first_name": "Not provided",
+                "middle_name": "Not provided",
+                "last_name": "Not provided",
+                "gender": "Not provided",
+                "date_of_birth": "Not provided",
+                "place_of_birth": "Not provided",
+                "nationality": "Not provided",
+                "address": "Not provided",
+                "date_of_issue": "Not provided",
+                "date_of_expiry": "Not provided",
+                "blood_group": "Not provided",
+                "personal_id_number": "Not provided",
+                "father_name": "Not provided",
+                "mother_name": "Not provided",
+                "marital_status": "Not provided",
+                "photo_base64": "Not provided",
+                "signature_base64": "Not provided",
+                "additional_info": "Not provided",
+                "error": "No JSON block found",
+                "raw_output": raw_output
+            }
         except Exception:
-            return {}
-
+            return {
+                "document_type": "Not provided",
+                "document_number": "Not provided",
+                "country_of_issue": "Not provided",
+                "issuing_authority": "Not provided",
+                "full_name": "Not provided",
+                "first_name": "Not provided",
+                "middle_name": "Not provided",
+                "last_name": "Not provided",
+                "gender": "Not provided",
+                "date_of_birth": "Not provided",
+                "place_of_birth": "Not provided",
+                "nationality": "Not provided",
+                "address": "Not provided",
+                "date_of_issue": "Not provided",
+                "date_of_expiry": "Not provided",
+                "blood_group": "Not provided",
+                "personal_id_number": "Not provided",
+                "father_name": "Not provided",
+                "mother_name": "Not provided",
+                "marital_status": "Not provided",
+                "photo_base64": "Not provided",
+                "signature_base64": "Not provided",
+                "additional_info": "Not provided",
+                "error": "Failed to parse KYC fields",
+                "raw_output": raw_output
+            }
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
     return sim.item(), sim.item() >= threshold
 
-# --- ✅ Improved Canada Post Lookup ---
 def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
-        return None
+        return False
+    url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
+    response = requests.get(
+        url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
+    )
+    return len(response.json().get("Items", [])) > 0
 
-    base_url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
-
-    def query_api(cleaned_text):
-        try:
-            response = requests.get(
-                base_url,
-                params={
-                    "Key": CANADA_POST_API_KEY,
-                    "Text": cleaned_text,
-                    "Country": "CAN"
-                },
-                timeout=5
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data.get("Items", [])
-        except Exception as e:
-            print(f"Canada Post API error: {e}")
-            return []
-
-    variations = set()
-    variations.add(address)
-    variations.add(address.upper())
-    variations.add(address.lower())
-    variations.add(address.replace("’", "'"))
-    variations.add(re.sub(r"[’']", "", address))
-    variations.add(re.sub(r"[’']", " ", address))
-    variations.add(re.sub(r"\s+", " ", address.strip()))
-
-    for variant in variations:
-        results = query_api(variant)
-        for item in results:
-            if item.get("Text"):
-                return item["Text"].strip()
-
-    return None
-
-# --- ✅ Updated: fallback scoring logic
 def kyc_multi_verify(files, expected_address, model_choice):
     if not files or len(files) < 2:
         return "❌ Please upload at least two documents.", {}, {}
@@ -198,45 +227,28 @@ def kyc_multi_verify(files, expected_address, model_choice):
         results = {}
         kyc_fields = {}
         addresses = []
-        authenticity_scores = []
-
         for idx, file in enumerate(files):
             text = extract_text_from_file(file.name)
             address = extract_address_with_llm(text, model_choice)
             sim, match = semantic_match(address, expected_address)
-            verified_address = verify_with_canada_post(address)
-
-            if verified_address:
-                sim_score, _ = semantic_match(address, verified_address)
-            else:
-                sim_score, _ = semantic_match(address, expected_address)
-
-            authenticity_score = round(sim_score * 100, 2)
-            authenticity_scores.append(authenticity_score)
-
+            verified = verify_with_canada_post(address)
             fields = extract_kyc_fields(text, model_choice)
             addresses.append(address)
-
             results[f"extracted_address_{idx+1}"] = address
             results[f"similarity_to_expected_{idx+1}"] = round(sim, 3)
             results[f"address_match_{idx+1}"] = match
-            results[f"canada_post_verified_{idx+1}"] = bool(verified_address)
-            results[f"canada_post_match_address_{idx+1}"] = verified_address or "Not verified"
-            results[f"authenticity_score_{idx+1}"] = authenticity_score
+            results[f"canada_post_verified_{idx+1}"] = verified
             kyc_fields[f"document_{idx+1}"] = filter_non_null_fields(fields)
 
         consistency_score, consistent = semantic_match(addresses[0], addresses[1])
         results["document_consistency_score"] = round(consistency_score, 3)
         results["documents_consistent"] = consistent
-        results["average_authenticity_score"] = round(sum(authenticity_scores) / len(authenticity_scores), 2)
-
-        # ✅ New passing logic: 90+ authenticity & consistency
-        results["final_result"] = results["average_authenticity_score"] >= 90 and consistent
+        results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and consistent
 
         status = (
-            f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Authenticity Score: <b>{results['average_authenticity_score']}%</b>"
+            f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b>"
             if results["final_result"]
-            else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Authenticity Score: <b>{results['average_authenticity_score']}%</b>"
+            else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b>"
         )
         return status, results, kyc_fields
     except Exception as e:
