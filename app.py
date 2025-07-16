@@ -129,6 +129,110 @@ def kyc_multi_verify(files, expected_address, provider):
     except Exception as e:
         return f"❌ Error: {str(e)}", {}, {}
 
+def extract_kyc_fields(text, model_choice):
+    template = """
+You are an expert KYC document parser. Extract only factual data from the document.
+If any field is missing, set it to "Not provided". DO NOT infer.
+
+The address must include building/house number, street, city, province, postal code.
+
+Return only the JSON below:
+
+{{
+  "document_type": "string or 'Not provided'",
+  "document_number": "string or 'Not provided'",
+  "country_of_issue": "string or 'Not provided'",
+  "issuing_authority": "string or 'Not provided'",
+  "full_name": "string or 'Not provided'",
+  "first_name": "string or 'Not provided'",
+  "middle_name": "string or 'Not provided'",
+  "last_name": "string or 'Not provided'",
+  "gender": "string or 'Not provided'",
+  "date_of_birth": "string or 'Not provided'",
+  "place_of_birth": "string or 'Not provided'",
+  "nationality": "string or 'Not provided'",
+  "address": "string or 'Not provided'",
+  "date_of_issue": "string or 'Not provided'",
+  "date_of_expiry": "string or 'Not provided'",
+  "blood_group": "string or 'Not provided'",
+  "personal_id_number": "string or 'Not provided'",
+  "father_name": "string or 'Not provided'",
+  "mother_name": "string or 'Not provided'",
+  "marital_status": "string or 'Not provided'",
+  "photo_base64": "string or 'Not provided'",
+  "signature_base64": "string or 'Not provided'",
+  "additional_info": "string or 'Not provided'"
+}}
+
+Text:
+{text}
+"""
+    from langchain.prompts import PromptTemplate
+    from langchain.chains import LLMChain
+    prompt = PromptTemplate(template=template, input_variables=["text"], template_format="f-string")
+    result = LLMChain(llm=get_llm(model_choice), prompt=prompt).invoke({"text": text})
+    raw_output = result["text"].strip()
+    try:
+        return json.loads(raw_output)
+    except Exception:
+        json_match = re.search(r"\{[\s\S]+\}", raw_output)
+        try:
+            return json.loads(json_match.group()) if json_match else {
+                "document_type": "Not provided",
+                "document_number": "Not provided",
+                "country_of_issue": "Not provided",
+                "issuing_authority": "Not provided",
+                "full_name": "Not provided",
+                "first_name": "Not provided",
+                "middle_name": "Not provided",
+                "last_name": "Not provided",
+                "gender": "Not provided",
+                "date_of_birth": "Not provided",
+                "place_of_birth": "Not provided",
+                "nationality": "Not provided",
+                "address": "Not provided",
+                "date_of_issue": "Not provided",
+                "date_of_expiry": "Not provided",
+                "blood_group": "Not provided",
+                "personal_id_number": "Not provided",
+                "father_name": "Not provided",
+                "mother_name": "Not provided",
+                "marital_status": "Not provided",
+                "photo_base64": "Not provided",
+                "signature_base64": "Not provided",
+                "additional_info": "Not provided",
+                "error": "No JSON block found",
+                "raw_output": raw_output
+            }
+        except Exception:
+            return {
+                "document_type": "Not provided",
+                "document_number": "Not provided",
+                "country_of_issue": "Not provided",
+                "issuing_authority": "Not provided",
+                "full_name": "Not provided",
+                "first_name": "Not provided",
+                "middle_name": "Not provided",
+                "last_name": "Not provided",
+                "gender": "Not provided",
+                "date_of_birth": "Not provided",
+                "place_of_birth": "Not provided",
+                "nationality": "Not provided",
+                "address": "Not provided",
+                "date_of_issue": "Not provided",
+                "date_of_expiry": "Not provided",
+                "blood_group": "Not provided",
+                "personal_id_number": "Not provided",
+                "father_name": "Not provided",
+                "mother_name": "Not provided",
+                "marital_status": "Not provided",
+                "photo_base64": "Not provided",
+                "signature_base64": "Not provided",
+                "additional_info": "Not provided",
+                "error": "Failed to parse KYC fields",
+                "raw_output": raw_output
+            }
+
 # --- UI ---
 custom_css = """
 .purple-small {
