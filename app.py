@@ -2,7 +2,6 @@ import os
 import re
 import json
 import requests
-import time
 import gradio as gr
 from sentence_transformers import SentenceTransformer, util
 from unstructured.partition.pdf import partition_pdf
@@ -20,43 +19,42 @@ CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
 
+# --- Core Functions ---
 def extract_text_from_file(file_path):
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext == ".pdf":
-        elements = partition_pdf(filename=file_path)
-    elif ext in [".jpg", ".jpeg", ".png", ".bmp"]:
-        elements = partition_image(filename=file_path)
-    else:
-        raise ValueError("Unsupported file type. Please upload PDF or image.")
-    text = "\n".join(str(e) for e in elements)
-    print(f"\n--- Extracted Text from {file_path} ---\n{text}\n----------------------------\n")
-    return text
+    try:
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == ".pdf":
+            elements = partition_pdf(file_path)
+        elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
+            elements = partition_image(filename=file_path)
+        else:
+            raise ValueError("Unsupported file type. Please upload a PDF or image.")
+        return "\n".join([str(e) for e in elements])
+    except Exception as e:
+        print(f"❌ Error extracting text: {e}")
+        return "❌ Error: Unable to extract text. Please check your file and environment."
 
-def get_llm(model_choice="OpenAI"):
+def get_llm(model_choice):
+    model_map = {
+        "Mistral": "mistralai/Mistral-7B-Instruct-v0.2",
+        "OpenAI": "openai/gpt-4o"
+    }
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY is not set.")
-
-    model_map = {
-        "OpenAI": "openai/gpt-4o",
-        "Mistral": "mistralai/mistral-7b-instruct"
-    }
-
-    model_id = model_map.get(model_choice)
-    if not model_id:
-        raise ValueError(f"Invalid model_choice: {model_choice}")
-
     return ChatOpenAI(
         temperature=0.2,
-        model_name=model_id,
+        model_name=model_map[model_choice],
         base_url="https://openrouter.ai/api/v1",
         openai_api_key=OPENROUTER_API_KEY,
         max_tokens=2000,
     )
 
-def clean_extracted_address(raw_response, original_text=""):
+def clean_address_mistral(raw_response, original_text=""):
+    # Flatten and normalize text
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
-    flattened = re.sub(r"^\s*[\•\-–—]?\s*", "", flattened)
-    flattened = re.sub(r"\b\d+\.\d+\b", "", flattened)
+    # Remove leading section numbers like "15.", "8)", "2-"
+    flattened = re.sub(r"^\s*(\d+[\.\-\):]?)\s*", "", flattened)
+    # Try to extract valid Canadian address
     match = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
@@ -64,6 +62,7 @@ def clean_extracted_address(raw_response, original_text=""):
     )
     if match:
         return match.group(0).strip()
+    # Fallback: try to extract from full OCR text
     fallback = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         original_text.replace("\n", " "),
@@ -73,35 +72,32 @@ def clean_extracted_address(raw_response, original_text=""):
         return fallback.group(0).strip()
     return flattened
 
-def extract_address_with_llm(text, model_choice="OpenAI"):
-    regex_match = re.search(
-        r"\b\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d\b",
-        text.replace("\n", " "),
-        re.IGNORECASE
-    )
-    if regex_match:
-        return regex_match.group(0).strip()
-
-    template = (
-        "You are a strict document parser.\n"
-        "Extract the full Canadian residential address from the scanned document text.\n"
-        "Include house number, street name, city, province (2-letter code), and postal code.\n"
-        "DO NOT add or guess any values. Only extract exactly what appears in the document.\n"
-        "DO NOT hallucinate house numbers or add extra numbers like '8.2'.\n"
-        "Use digits as-is. No decimals. No approximations.\n"
-        "Format: 145 BAY STREET TORONTO, ON M5J 2R7\n\n"
-        "Text:\n{document_text}\n\nExtracted Address:"
-    )
+def extract_address_with_llm(text, model_choice):
+    if model_choice == "Mistral":
+        template = (
+            "You are extracting address information from Canadian government-issued documents such as a driver’s license. "
+            "The address is usually clearly marked and contains house/building number, street, city, province, and postal code. "
+            "Ignore any unrelated information like class, eye color, or restrictions. "
+            "Do NOT return anything unless it's a complete Canadian mailing address. "
+            "Return ONLY the address in a single line, no explanation or label.\n\n"
+            "Text:\n{document_text}\n\nExtracted Address:"
+        )
+    else:
+        template = (
+            "Extract the full Canadian mailing address from the following text. "
+            "Include street, city, province, and postal code.\n\n"
+            "Text: {document_text}\n\nAddress:"
+        )
     prompt = PromptTemplate(template=template, input_variables=["document_text"])
     llm = get_llm(model_choice)
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"document_text": text})
     raw = result["text"].strip()
-    return clean_extracted_address(raw, original_text=text)
+    return clean_address_mistral(raw, original_text=text) if model_choice == "Mistral" else raw
 
-def extract_kyc_fields(text, model_choice="OpenAI"):
+def extract_kyc_fields(text, model_choice):
     prompt_text = """
-You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, license, visa, etc. Return ONLY the resulting JSON object. If any field is missing, set it as null.
+You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, driving license, national identity card, or any type of VISA document (including but not limited to tourist visas, work visas, student visas, resident visas, entry permits, e-visas, visa labels, or visa stamps). Use the visible field labels, visual structure, and document layout to capture the data, but do not invent fields or infer details that do not explicitly appear on the document. If any field is missing, set its value as null. Return ONLY the resulting JSON object (no explanation, no text before or after). Use this schema for the unified KYC data extraction:
 
 {{
   "document_type": "string or null",
@@ -139,49 +135,15 @@ Text:
     raw_output = result["text"].strip()
     try:
         return json.loads(raw_output)
-    except Exception:
-        # Try to extract the first JSON object from the output, ignoring any leading/trailing text
+    except json.JSONDecodeError:
         json_match = re.search(r'\{[\s\S]+\}', raw_output)
         if json_match:
             try:
                 return json.loads(json_match.group())
-            except Exception:
-                pass
-        start = raw_output.find('{')
-        end = raw_output.rfind('}')
-        if start != -1 and end != -1 and end > start:
-            try:
-                return json.loads(raw_output[start:end+1])
-            except Exception:
-                pass
-        # Always return all fields (with null) if parsing fails
-        return {
-            "document_type": None,
-            "document_number": None,
-            "country_of_issue": None,
-            "issuing_authority": None,
-            "full_name": None,
-            "first_name": None,
-            "middle_name": None,
-            "last_name": None,
-            "gender": None,
-            "date_of_birth": None,
-            "place_of_birth": None,
-            "nationality": None,
-            "address": None,
-            "date_of_issue": None,
-            "date_of_expiry": None,
-            "blood_group": None,
-            "personal_id_number": None,
-            "father_name": None,
-            "mother_name": None,
-            "marital_status": None,
-            "photo_base64": None,
-            "signature_base64": None,
-            "additional_info": None,
-            "error": "Failed to parse KYC fields",
-            "raw_output": raw_output
-        }
+            except:
+                return {"error": "Failed to parse cleaned JSON block"}
+        else:
+            return {"error": "No JSON block found in response"}
 
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
@@ -190,73 +152,65 @@ def semantic_match(text1, text2, threshold=0.82):
 
 def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
-        return False, None, 0
+        return False
     url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
-    response = requests.get(url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"})
+    response = requests.get(
+        url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
+    )
     data = response.json()
-    items = data.get("Items", [])
-    if not items:
-        return False, None, 0
-    top_result = items[0].get("Text", "")
-    score, _ = semantic_match(address, top_result)
-    return True, top_result, int(round(score * 100))
+    return len(data.get("Items", [])) > 0
 
-def kyc_multi_verify(files, expected_address, model_choice="OpenAI", strictness=0.82):
-    if not files or len(files) < 2:
-        return "❌ Verification Failed: Please upload at least two documents.", {}, {}
-
+def kyc_dual_verify(file1, file2, expected_address, model_choice):
+    if file1 is None or file2 is None:
+        return "❌ Verification Failed: Please upload both documents.", {}, {}
     try:
-        extracted_addresses, kyc_data = [], {}
-        similarity_scores, canada_post_verifications = [], []
-        suggested_addresses, authenticity_scores = [], []
-
-        for idx, file in enumerate(files[:3]):
-            text = extract_text_from_file(file.name)
-            address = extract_address_with_llm(text, model_choice)
-            sim_score, match = semantic_match(address, expected_address, threshold=strictness)
-            verified, suggested_address, authenticity_score = verify_with_canada_post(address)
-            kyc_fields = filter_non_null_fields(extract_kyc_fields(text, model_choice))
-
-            extracted_addresses.append(address)
-            similarity_scores.append((sim_score, match))
-            canada_post_verifications.append(verified)
-            suggested_addresses.append(suggested_address)
-            authenticity_scores.append(authenticity_score)
-            kyc_data[f"document_{idx+1}"] = kyc_fields
-
-        consistency_score, consistent = semantic_match(extracted_addresses[0], extracted_addresses[1], threshold=strictness)
+        text1 = extract_text_from_file(file1.name)
+        text2 = extract_text_from_file(file2.name)
+        address1 = extract_address_with_llm(text1, model_choice)
+        address2 = extract_address_with_llm(text2, model_choice)
+        sim1, match1 = semantic_match(address1, expected_address)
+        sim2, match2 = semantic_match(address2, expected_address)
+        verified1 = verify_with_canada_post(address1)
+        verified2 = verify_with_canada_post(address2)
+        consistency_score, consistent = semantic_match(address1, address2)
         percent_score = int(round(consistency_score * 100))
-        passed = all(m for _, m in similarity_scores) and all(canada_post_verifications) and consistent
-
+        kyc_fields_1 = filter_non_null_fields(extract_kyc_fields(text1, model_choice))
+        kyc_fields_2 = filter_non_null_fields(extract_kyc_fields(text2, model_choice))
+        kyc_combined = {
+            "first_document": kyc_fields_1,
+            "second_document": kyc_fields_2
+        }
+        passed = all([match1, match2, verified1, verified2, consistent])
         verification_result = {
-            "extracted_addresses": extracted_addresses,
-            "suggested_canada_post_addresses": suggested_addresses,
-            "authenticity_scores": authenticity_scores,
-            "similarity_scores_to_expected": [round(s, 3) for s, _ in similarity_scores],
-            "address_matches": [m for _, m in similarity_scores],
-            "canada_post_verified": canada_post_verifications,
+            "extracted_address_1": address1,
+            "extracted_address_2": address2,
+            "similarity_to_expected_1": round(sim1, 3),
+            "similarity_to_expected_2": round(sim2, 3),
+            "address_match_1": match1,
+            "address_match_2": match2,
+            "canada_post_verified_1": verified1,
+            "canada_post_verified_2": verified2,
             "document_consistency_score": round(consistency_score, 3),
             "documents_consistent": consistent,
-            "final_result": passed,
-            "strictness_threshold_used": round(strictness, 2)
+            "final_result": passed
         }
-
-        status = f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{percent_score}%</b>" if passed else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{percent_score}%</b>"
-
-        return status, verification_result, kyc_data
-
+        if passed:
+            status = f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{percent_score}%</b>"
+        else:
+            status = f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{percent_score}%</b>"
+        return status, verification_result, kyc_combined
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
 
-# --- UI Layout ---
+# --- UI ---
 custom_css = """
 .purple-small {
     background-color: #a020f0 !important;
     color: white !important;
     font-weight: bold !important;
-    font-size: 13px !important;
-    padding: 4px 14px !important;
-    border-radius: 5px !important;
+    font-size: 16px !important;
+    padding: 8px 20px !important;
+    border-radius: 6px !important;
     border: none !important;
 }
 h1 {
@@ -283,45 +237,59 @@ h1 {
     font-size: 18px !important;
     font-weight: bold;
 }
+.purple-button button,
+.purple-button button:hover,
+.purple-button button:focus {
+    background-color: #a020f0 !important;
+    color: white !important;
+    font-weight: bold !important;
+    font-size: 16px !important;
+    padding: 10px 22px !important;
+    border-radius: 8px !important;
+    border: none !important;
+    box-shadow: none !important;
+    transition: background 0.3s ease-in-out;
+}
 """
 
 with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
     gr.Markdown("# EZOFIS KYC Agent")
-
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>1</span> **Upload 2 or 3 Documents**")
-            multi_file_input = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], file_count="multiple", label="KYC Documents")
+            gr.Markdown("<span class='purple-circle'>1</span> **Upload Document 1 (e.g., License)**")
+            file_input_1 = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="Document 1")
         with gr.Column():
             gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
-            expected_address = gr.Textbox(label="Expected Address", placeholder="e.g., 145 BAY STREET TORONTO, ON M5J 2R7")
-
+            expected_address = gr.Textbox(
+                label="Expected Address",
+                placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2"
+            )
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>3</span> **Similarity Strictness**")
-            strictness_slider = gr.Slider(minimum=0.6, maximum=0.95, step=0.01, value=0.82, label="Similarity Threshold")
+            gr.Markdown("<span class='purple-circle'>3</span> **Upload Document 2 (e.g., Void Cheque)**")
+            file_input_2 = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="Document 2")
         with gr.Column():
-            model_choice = gr.Dropdown(choices=["OpenAI", "Mistral"], value="OpenAI", label="Model Provider")
+            gr.Markdown("<span class='purple-circle'>4</span> **Select LLM Provider**")
+            model_choice = gr.Dropdown(
+                choices=["Mistral", "OpenAI"], value="Mistral", label="LLM Provider"
+            )
             verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
-
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>4</span> **KYC Verification Status**")
+            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Status**")
             status_html = gr.HTML()
-
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Details**")
+            gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
-                output_json = gr.JSON(label="Verification Result")
+                output_json = gr.JSON(label="KYC Output")
                 with gr.Group():
-                    gr.Markdown("### Extracted Document Data")
-                    document_info_json = gr.JSON(label="KYC Fields")
-
+                    gr.Markdown("### Extracted Document Details")
+                    document_info_json = gr.JSON(label="Document Fields")
     verify_btn.click(
-        fn=kyc_multi_verify,
-        inputs=[multi_file_input, expected_address, model_choice, strictness_slider],
+        fn=kyc_dual_verify,
+        inputs=[file_input_1, file_input_2, expected_address, model_choice],
         outputs=[status_html, output_json, document_info_json]
     )
 
