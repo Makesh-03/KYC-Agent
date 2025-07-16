@@ -91,7 +91,7 @@ def extract_kyc_fields(text, model_choice, extracted_address_1=None):
     prompt_text = """
 You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, driving license, national identity card, or any type of VISA document. Return ONLY the resulting JSON object:
 
-{
+{{
   "document_type": "string or null",
   "document_number": "string or null",
   "country_of_issue": "string or null",
@@ -115,7 +115,7 @@ You are an expert KYC document parser. Extract all relevant information from the
   "photo_base64": "string or null",
   "signature_base64": "string or null",
   "additional_info": "string or null"
-}
+}}
 
 Text:
 {text}
@@ -127,9 +127,39 @@ Text:
     raw_output = result["text"].strip()
     try:
         kyc_output = json.loads(raw_output)
-    except json.JSONDecodeError:
+    except Exception:
         json_match = re.search(r'\{[\s\S]+\}', raw_output)
-        kyc_output = json.loads(json_match.group()) if json_match else {"error": "No JSON block found"}
+        try:
+            kyc_output = json.loads(json_match.group()) if json_match else {"error": "No JSON block found"}
+        except Exception:
+            # Always return all fields (with null) if parsing fails
+            kyc_output = {
+                "document_type": None,
+                "document_number": None,
+                "country_of_issue": None,
+                "issuing_authority": None,
+                "full_name": None,
+                "first_name": None,
+                "middle_name": None,
+                "last_name": None,
+                "gender": None,
+                "date_of_birth": None,
+                "place_of_birth": None,
+                "nationality": None,
+                "address": None,
+                "date_of_issue": None,
+                "date_of_expiry": None,
+                "blood_group": None,
+                "personal_id_number": None,
+                "father_name": None,
+                "mother_name": None,
+                "marital_status": None,
+                "photo_base64": None,
+                "signature_base64": None,
+                "additional_info": None,
+                "error": "Failed to parse KYC fields",
+                "raw_output": raw_output
+            }
     if "address" in kyc_output:
         addr = kyc_output["address"]
         if len(addr) < 10 or re.search(r"(Eyes|Sex|Height|Classe|\d+\.)", addr, re.IGNORECASE):
