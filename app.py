@@ -38,7 +38,7 @@ def get_llm(model_choice):
         temperature=0.2,
         model_name=model_map[model_choice],
         openai_api_key=OPENROUTER_API_KEY,
-        openai_api_base="https://openrouter.ai/api/v1",  # ✅ Correct argument
+        openai_api_base="https://openrouter.ai/api/v1",  # ✅ Use this instead of `base_url`
         max_tokens=2000,
     )
 
