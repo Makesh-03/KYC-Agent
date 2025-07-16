@@ -348,10 +348,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
 
 if __name__ == "__main__":
     iface.launch(share=True)
-    )
-
-if __name__ == "__main__":
-    iface.launch(share=True)
+   
     
 
 
