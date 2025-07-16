@@ -1,45 +1,34 @@
-# Full updated KYC Agent with Canada Post Authenticity Score (House Number Fix + Similarity Strictness Slider)
-
-# Full updated KYC Agent with Canada Post Authenticity Score (Anti-Hallucination Fix + Similarity Strictness Slider)
-
-# Full updated KYC Agent with Canada Post Authenticity Score (Anti-Hallucination Fix + Similarity Strictness Slider)
-
 import os
 import re
 import json
 import requests
 import gradio as gr
 from sentence_transformers import SentenceTransformer, util
-from unstructured.partition.pdf import partition_pdf
-from unstructured.partition.image import partition_image
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain.chat_models import ChatOpenAI
+from unstructured.partition.api import partition_via_api  # Use Unstructured API instead
 
 # --- Config ---
 similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
+UNSTRUCTURED_API_KEY = os.getenv("UNSTRUCTURED_API_KEY")
 
 # --- Helpers ---
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
 
 def extract_text_from_file(file_path):
-    import pytesseract
-    from PIL import Image
-    ext = os.path.splitext(file_path)[1].lower()
+    if not UNSTRUCTURED_API_KEY:
+        raise ValueError("UNSTRUCTURED_API_KEY is not set.")
 
-    if ext == ".pdf":
-        elements = partition_pdf(file_path)
-        text = "\n".join([str(e) for e in elements])
-    elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
-        # Use pytesseract instead of unstructured.partition for better digit accuracy
-        image = Image.open(file_path)
-        text = pytesseract.image_to_string(image)
-    else:
-        raise ValueError("Unsupported file type. Please upload a PDF or image.")
-
+    elements = partition_via_api(
+        filename=file_path,
+        api_key=UNSTRUCTURED_API_KEY,
+        strategy="auto",
+    )
+    text = "\n".join([str(e) for e in elements])
     print(f"\n--- Extracted Text from {file_path} ---\n{text}\n----------------------------\n")
     return text
 
@@ -57,7 +46,7 @@ def get_llm(model_choice="OpenAI"):
 def clean_extracted_address(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
     flattened = re.sub(r"^\s*[\•\-–—]?\s*", "", flattened)
-    flattened = re.sub(r"\b\d+\.\d+\b", "", flattened)  # remove hallucinated decimal house numbers
+    flattened = re.sub(r"\b\d+\.\d+\b", "", flattened)
 
     match = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
@@ -78,7 +67,6 @@ def clean_extracted_address(raw_response, original_text=""):
     return flattened
 
 def extract_address_with_llm(text, model_choice="OpenAI"):
-    # Try extracting directly via regex before LLM
     regex_match = re.search(
         r"\b\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d\b",
         text.replace("\n", " "),
@@ -87,7 +75,6 @@ def extract_address_with_llm(text, model_choice="OpenAI"):
     if regex_match:
         return regex_match.group(0).strip()
 
-    # Otherwise, call LLM
     template = (
         "You are a strict document parser.\n"
         "Extract the full Canadian residential address from the scanned document text.\n"
@@ -103,10 +90,7 @@ def extract_address_with_llm(text, model_choice="OpenAI"):
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"document_text": text})
     raw = result["text"].strip()
-    cleaned = clean_extracted_address(raw, original_text=text)
-    return cleaned
-
-
+    return clean_extracted_address(raw, original_text=text)
 
 def extract_kyc_fields(text, model_choice="OpenAI"):
     prompt_text = """
@@ -147,27 +131,22 @@ Text:
     result = chain.invoke({"text": text})
     raw_output = result["text"].strip()
 
-    # Try to extract JSON from the LLM output robustly
     try:
         return json.loads(raw_output)
     except json.JSONDecodeError:
-        # Try to extract the first JSON object from the output, ignoring any leading/trailing text
         json_match = re.search(r'\{[\s\S]+\}', raw_output)
         if json_match:
             try:
                 return json.loads(json_match.group())
             except Exception:
                 pass
-        # Try to fix common LLM output issues: remove lines before the first '{' and after the last '}'
         start = raw_output.find('{')
         end = raw_output.rfind('}')
         if start != -1 and end != -1 and end > start:
-            json_str = raw_output[start:end+1]
             try:
-                return json.loads(json_str)
+                return json.loads(raw_output[start:end+1])
             except Exception:
                 pass
-        # Always return all fields (with null) if parsing fails
         return {
             "document_type": None,
             "document_number": None,
@@ -211,7 +190,6 @@ def verify_with_canada_post(address):
     )
     data = response.json()
     items = data.get("Items", [])
-
     if not items:
         return False, None, 0
 
@@ -224,12 +202,9 @@ def kyc_multi_verify(files, expected_address, model_choice="OpenAI", strictness=
         return "❌ Verification Failed: Please upload at least two documents.", {}, {}
 
     try:
-        extracted_addresses = []
-        kyc_data = {}
-        similarity_scores = []
-        canada_post_verifications = []
-        suggested_addresses = []
-        authenticity_scores = []
+        extracted_addresses, kyc_data = [], {}
+        similarity_scores, canada_post_verifications = [], []
+        suggested_addresses, authenticity_scores = [], []
 
         for idx, file in enumerate(files[:3]):
             text = extract_text_from_file(file.name)
@@ -269,7 +244,7 @@ def kyc_multi_verify(files, expected_address, model_choice="OpenAI", strictness=
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
 
-# --- UI Layout ---
+# --- UI ---
 custom_css = """
 .purple-small {
     background-color: #a020f0 !important;
@@ -321,7 +296,6 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
         with gr.Column():
             gr.Markdown("<span class='purple-circle'>3</span> **Similarity Strictness (Adjust Sensitivity)**")
             strictness_slider = gr.Slider(minimum=0.6, maximum=0.95, step=0.01, value=0.82, label="Similarity Strictness Threshold")
-
         with gr.Column():
             model_choice = gr.Textbox(value="OpenAI", visible=False)
             verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
@@ -347,12 +321,5 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
         outputs=[status_html, output_json, document_info_json]
     )
 
-
-    
-
 if __name__ == "__main__":
     iface.launch(share=True)
-   
-    
-
-
