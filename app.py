@@ -103,7 +103,7 @@ def extract_kyc_fields(text, model_choice="OpenAI"):
     prompt_text = """
 You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, license, visa, etc. Return ONLY the resulting JSON object. If any field is missing, set it as null.
 
-{
+{{
   "document_type": "string or null",
   "document_number": "string or null",
   "country_of_issue": "string or null",
@@ -127,7 +127,7 @@ You are an expert KYC document parser. Extract all relevant information from the
   "photo_base64": "string or null",
   "signature_base64": "string or null",
   "additional_info": "string or null"
-}
+}}
 
 Text:
 {text}
@@ -139,8 +139,49 @@ Text:
     raw_output = result["text"].strip()
     try:
         return json.loads(raw_output)
-    except:
-        return {"error": "Failed to parse KYC fields", "raw_output": raw_output}
+    except Exception:
+        # Try to extract the first JSON object from the output, ignoring any leading/trailing text
+        json_match = re.search(r'\{[\s\S]+\}', raw_output)
+        if json_match:
+            try:
+                return json.loads(json_match.group())
+            except Exception:
+                pass
+        start = raw_output.find('{')
+        end = raw_output.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(raw_output[start:end+1])
+            except Exception:
+                pass
+        # Always return all fields (with null) if parsing fails
+        return {
+            "document_type": None,
+            "document_number": None,
+            "country_of_issue": None,
+            "issuing_authority": None,
+            "full_name": None,
+            "first_name": None,
+            "middle_name": None,
+            "last_name": None,
+            "gender": None,
+            "date_of_birth": None,
+            "place_of_birth": None,
+            "nationality": None,
+            "address": None,
+            "date_of_issue": None,
+            "date_of_expiry": None,
+            "blood_group": None,
+            "personal_id_number": None,
+            "father_name": None,
+            "mother_name": None,
+            "marital_status": None,
+            "photo_base64": None,
+            "signature_base64": None,
+            "additional_info": None,
+            "error": "Failed to parse KYC fields",
+            "raw_output": raw_output
+        }
 
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
