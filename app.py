@@ -134,7 +134,33 @@ Text:
     except Exception:
         json_match = re.search(r"\{[\s\S]+\}", raw_output)
         try:
-            return json.loads(json_match.group()) if json_match else {"error": "No JSON block found"}
+            return json.loads(json_match.group()) if json_match else {
+                "document_type": "Not provided",
+                "document_number": "Not provided",
+                "country_of_issue": "Not provided",
+                "issuing_authority": "Not provided",
+                "full_name": "Not provided",
+                "first_name": "Not provided",
+                "middle_name": "Not provided",
+                "last_name": "Not provided",
+                "gender": "Not provided",
+                "date_of_birth": "Not provided",
+                "place_of_birth": "Not provided",
+                "nationality": "Not provided",
+                "address": "Not provided",
+                "date_of_issue": "Not provided",
+                "date_of_expiry": "Not provided",
+                "blood_group": "Not provided",
+                "personal_id_number": "Not provided",
+                "father_name": "Not provided",
+                "mother_name": "Not provided",
+                "marital_status": "Not provided",
+                "photo_base64": "Not provided",
+                "signature_base64": "Not provided",
+                "additional_info": "Not provided",
+                "error": "No JSON block found",
+                "raw_output": raw_output
+            }
         except Exception:
             # Always return all fields (with "Not provided") if parsing fails
             return {
