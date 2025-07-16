@@ -221,7 +221,7 @@ def verify_with_canada_post(address):
 
 def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
     if not files or len(files) < 2:
-        return "❌ Please upload at least two documents.", [], []
+        return "❌ Please upload at least two documents.", [], [[] for _ in range(2)]
     try:
         results = {}
         kyc_fields = {}
@@ -259,11 +259,11 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             ["Final Result", "Passed" if results["final_result"] else "Failed"]
         ]
 
-        # Prepare table data for Document Details
+        # Prepare table data for Document Details (dynamic based on number of files)
         doc_details_data = []
-        for idx in range(len(files)):
+        for idx in range(min(len(files), 2)):  # Limit to 2 tables for now
             doc_data = [
-                ["Field", "Document " + str(idx + 1)],
+                ["Field", f"Document {idx + 1}"],
                 ["Extracted Address", results[f"extracted_address_{idx+1}"]],
                 ["Similarity to Expected", str(results[f"similarity_to_expected_{idx+1}"])],
                 ["Address Match", str(results[f"address_match_{idx+1}"])],
@@ -274,6 +274,10 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             ]
             doc_details_data.append(doc_data)
 
+        # Pad with empty lists if fewer than 2 documents
+        while len(doc_details_data) < 2:
+            doc_details_data.append([])
+
         status = (
             f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
             if results["final_result"]
@@ -281,7 +285,7 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         )
         return status, kyc_output_data, doc_details_data
     except Exception as e:
-        return f"❌ Error: {str(e)}", [], []
+        return f"❌ Error: {str(e)}", [], [[] for _ in range(2)]
 
 # --- UI ---
 custom_css = """
