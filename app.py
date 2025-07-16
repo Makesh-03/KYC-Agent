@@ -19,20 +19,15 @@ CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
 
-# --- Core Functions ---
 def extract_text_from_file(file_path):
-    try:
-        ext = os.path.splitext(file_path)[1].lower()
-        if ext == ".pdf":
-            elements = partition_pdf(file_path)
-        elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
-            elements = partition_image(filename=file_path)
-        else:
-            raise ValueError("Unsupported file type. Please upload a PDF or image.")
-        return "\n".join([str(e) for e in elements])
-    except Exception as e:
-        print(f"❌ Error extracting text: {e}")
-        return "❌ Error: Unable to extract text. Please check your file and environment."
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
+        elements = partition_pdf(file_path)
+    elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
+        elements = partition_image(filename=file_path)
+    else:
+        raise ValueError("Unsupported file type. Please upload a PDF or image.")
+    return "\n".join([str(e) for e in elements])
 
 def get_llm(model_choice):
     model_map = {
@@ -53,14 +48,14 @@ def clean_address_mistral(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
     flattened = re.sub(r"^\s*(\d+[\.\-\):]?)\s*", "", flattened)
     match = re.search(
-        r"\b\d{1,5}\s+[A-Za-z0-9\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z]\s?\d[A-Z]\d\b",
+        r"\b\d{1,5}\s+[A-Za-z0-9\s.,'-]+?,\s*\w+\s*,\s*[A-Z]{2}\s*,?\s*[A-Z]\d[A-Z]\s?\d[A-Z]\d\b",
         flattened,
         re.IGNORECASE,
     )
     if match:
         return match.group(0).strip()
     fallback = re.search(
-        r"\b\d{1,5}\s+[A-Za-z0-9\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z]\s?\d[A-Z]\d\b",
+        r"\b\d{1,5}\s+[A-Za-z0-9\s.,'-]+?,\s*\w+\s*,\s*[A-Z]{2}\s*,?\s*[A-Z]\d[A-Z]\s?\d[A-Z]\d\b",
         original_text.replace("\n", " "),
         re.IGNORECASE,
     )
@@ -94,9 +89,9 @@ def extract_address_with_llm(text, model_choice):
 
 def extract_kyc_fields(text, model_choice, extracted_address_1=None):
     prompt_text = """
-You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, driving license, national identity card, or any type of VISA document (including but not limited to tourist visas, work visas, student visas, resident visas, entry permits, e-visas, visa labels, or visa stamps). Use the visible field labels, visual structure, and document layout to capture the data, but do not invent fields or infer details that do not explicitly appear on the document. If any field is missing, set its value as null. Return ONLY the resulting JSON object (no explanation, no text before or after). Use this schema for the unified KYC data extraction:
+You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, driving license, national identity card, or any type of VISA document. Return ONLY the resulting JSON object:
 
-{{
+{
   "document_type": "string or null",
   "document_number": "string or null",
   "country_of_issue": "string or null",
@@ -120,7 +115,7 @@ You are an expert KYC document parser. Extract all relevant information from the
   "photo_base64": "string or null",
   "signature_base64": "string or null",
   "additional_info": "string or null"
-}}
+}
 
 Text:
 {text}
@@ -135,12 +130,10 @@ Text:
     except json.JSONDecodeError:
         json_match = re.search(r'\{[\s\S]+\}', raw_output)
         kyc_output = json.loads(json_match.group()) if json_match else {"error": "No JSON block found"}
-
     if "address" in kyc_output:
         addr = kyc_output["address"]
         if len(addr) < 10 or re.search(r"(Eyes|Sex|Height|Classe|\d+\.)", addr, re.IGNORECASE):
             kyc_output["address"] = extracted_address_1
-
     return kyc_output
 
 def semantic_match(text1, text2, threshold=0.82):
@@ -158,52 +151,41 @@ def verify_with_canada_post(address):
     data = response.json()
     return len(data.get("Items", [])) > 0
 
-def kyc_dual_verify(file1, file2, expected_address, model_choice):
-    if file1 is None or file2 is None:
-        return "❌ Verification Failed: Please upload both documents.", {}, {}
+def kyc_multi_verify(files, expected_address, model_choice):
+    if not files or len(files) < 2:
+        return "❌ Verification Failed: Please upload at least two documents.", {}, {}
     try:
-        text1 = extract_text_from_file(file1.name)
-        text2 = extract_text_from_file(file2.name)
-        address1 = extract_address_with_llm(text1, model_choice)
-        address2 = extract_address_with_llm(text2, model_choice)
-        sim1, match1 = semantic_match(address1, expected_address)
-        sim2, match2 = semantic_match(address2, expected_address)
-        verified1 = verify_with_canada_post(address1)
-        verified2 = verify_with_canada_post(address2)
-        consistency_score, consistent = semantic_match(address1, address2)
-        percent_score = int(round(consistency_score * 100))
-        kyc_fields_1 = filter_non_null_fields(
-            extract_kyc_fields(text1, model_choice, extracted_address_1=address1)
-        )
-        kyc_fields_2 = filter_non_null_fields(
-            extract_kyc_fields(text2, model_choice, extracted_address_1=address2)
-        )
-        kyc_combined = {
-            "first_document": kyc_fields_1,
-            "second_document": kyc_fields_2
-        }
-        passed = all([match1, match2, verified1, verified2, consistent])
+        addresses = []
+        texts = [extract_text_from_file(f.name) for f in files]
+        for text in texts:
+            addr = extract_address_with_llm(text, model_choice)
+            addresses.append(addr)
+        matches = [semantic_match(addr, expected_address) for addr in addresses]
+        canada_verified = [verify_with_canada_post(addr) for addr in addresses]
+        consistency_scores = [
+            semantic_match(addresses[i], addresses[j])[0]
+            for i in range(len(addresses))
+            for j in range(i + 1, len(addresses))
+        ]
+        min_consistency = min(consistency_scores)
+        consistent = all(score >= 0.82 for score in consistency_scores)
+        percent_score = int(round(min_consistency * 100))
+        kyc_docs = [filter_non_null_fields(extract_kyc_fields(texts[i], model_choice, extracted_address_1=addresses[i])) for i in range(len(files))]
+        kyc_combined = {f"document_{i+1}": k for i, k in enumerate(kyc_docs)}
+        passed = all(m[1] for m in matches) and all(canada_verified) and consistent
         verification_result = {
-            "extracted_address_1": address1,
-            "extracted_address_2": address2,
-            "similarity_to_expected_1": round(sim1, 3),
-            "similarity_to_expected_2": round(sim2, 3),
-            "address_match_1": match1,
-            "address_match_2": match2,
-            "canada_post_verified_1": verified1,
-            "canada_post_verified_2": verified2,
-            "document_consistency_score": round(consistency_score, 3),
+            **{f"extracted_address_{i+1}": addr for i, addr in enumerate(addresses)},
+            **{f"similarity_to_expected_{i+1}": round(m[0], 3) for i, m in enumerate(matches)},
+            **{f"address_match_{i+1}": m[1] for i, m in enumerate(matches)},
+            **{f"canada_post_verified_{i+1}": v for i, v in enumerate(canada_verified)},
+            "document_consistency_score": round(min_consistency, 3),
             "documents_consistent": consistent,
             "final_result": passed
         }
         if passed:
-            status = (
-                f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{percent_score}%</b>"
-            )
+            status = f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{percent_score}%</b>"
         else:
-            status = (
-                f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{percent_score}%</b>"
-            )
+            status = f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{percent_score}%</b>"
         return status, verification_result, kyc_combined
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
@@ -262,40 +244,33 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
     gr.Markdown("# EZOFIS KYC Agent")
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>1</span> **Upload Document 1 (e.g., License)**")
-            file_input_1 = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="Document 1")
+            gr.Markdown("<span class='purple-circle'>1</span> **Upload Documents (2 or more)**")
+            file_inputs = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], file_count="multiple", label="Documents")
         with gr.Column():
             gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
-            expected_address = gr.Textbox(
-                label="Expected Address",
-                placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2"
-            )
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("<span class='purple-circle'>3</span> **Upload Document 2 (e.g., Void Cheque)**")
-            file_input_2 = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="Document 2")
-        with gr.Column():
-            gr.Markdown("<span class='purple-circle'>4</span> **Select LLM Provider**")
-            model_choice = gr.Dropdown(
-                choices=["Mistral", "OpenAI"], value="Mistral", label="LLM Provider"
-            )
+            expected_address = gr.Textbox(label="Expected Address", placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2")
+            gr.Markdown("<span class='purple-circle'>3</span> **Select LLM Provider**")
+            model_choice = gr.Dropdown(choices=["Mistral", "OpenAI"], value="Mistral", label="LLM Provider")
             verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
+
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Status**")
+            gr.Markdown("<span class='purple-circle'>4</span> **KYC Verification Status**")
             status_html = gr.HTML()
+
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
+            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Details**")
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
                 output_json = gr.JSON(label="KYC Output")
                 with gr.Group():
                     gr.Markdown("### Extracted Document Details")
                     document_info_json = gr.JSON(label="Document Fields")
+
     verify_btn.click(
-        fn=kyc_dual_verify,
-        inputs=[file_input_1, file_input_2, expected_address, model_choice],
+        fn=kyc_multi_verify,
+        inputs=[file_inputs, expected_address, model_choice],
         outputs=[status_html, output_json, document_info_json]
     )
 
