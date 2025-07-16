@@ -31,7 +31,18 @@ def extract_text_from_file(file_path):
         elements = partition_image(filename=file_path)
     else:
         raise ValueError("Unsupported file type. Please upload a PDF or image.")
-    return "\n".join([str(e) for e in elements])
+
+    text = "
+".join([str(e) for e in elements])
+
+    # DEBUG: print extracted text to diagnose missing numbers
+    print(f"
+--- Extracted Text from {file_path} ---
+{text}
+----------------------------
+")
+
+    return text"\n".join([str(e) for e in elements])
 
 def get_llm(model_choice="OpenAI"):
     if not OPENROUTER_API_KEY:
@@ -95,6 +106,7 @@ def extract_address_with_llm(text, model_choice="OpenAI"):
     raw = result["text"].strip()
     cleaned = clean_extracted_address(raw, original_text=text)
     return cleaned
+
 
 
 def extract_kyc_fields(text, model_choice="OpenAI"):
