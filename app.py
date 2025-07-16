@@ -1,3 +1,4 @@
+# ... (imports remain unchanged)
 import os
 import re
 import json
@@ -15,11 +16,9 @@ similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
-# --- Helpers ---
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
 
-# --- Core Functions ---
 def extract_text_from_file(file_path):
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".pdf":
@@ -69,10 +68,10 @@ def clean_extracted_address(raw_response, original_text=""):
 
 def extract_address_with_llm(text, model_choice):
     template = (
-        "Extract the full Canadian mailing address from the following text. "
-        "Include house/building number, street, city, province, and postal code. "
-        "Do NOT return anything unless it's a complete Canadian mailing address. "
-        "Return ONLY the address in a single line, no explanation or label.\n\n"
+        "You are extracting a Canadian residential mailing address from an OCR-scanned government-issued document. "
+        "Return only a valid address that includes ONLY: building number, street name, city, province (2-letter code), and postal code. "
+        "Do NOT include floating-point numbers or decimals. Use digits as-is. "
+        "Format strictly like this: 145 BAY STREET TORONTO, ON M5J 2R7\n\n"
         "Text:\n{document_text}\n\nExtracted Address:"
     )
     prompt = PromptTemplate(template=template, input_variables=["document_text"])
@@ -122,17 +121,20 @@ Text:
     result = chain.invoke({"text": text})
     raw_output = result["text"].strip()
 
+    # Try to extract JSON from the LLM output robustly
     try:
+        # If the output is a valid JSON object, return it
         return json.loads(raw_output)
     except json.JSONDecodeError:
+        # Try to extract the first JSON object from the output
         json_match = re.search(r'\{[\s\S]+\}', raw_output)
         if json_match:
             try:
                 return json.loads(json_match.group())
-            except:
-                return {"error": "Failed to parse cleaned JSON block"}
-        else:
-            return {"error": "No JSON block found in response"}
+            except Exception:
+                pass
+        # As a last resort, return the raw output as a string for debugging
+        return {"error": "Failed to parse KYC fields", "raw_output": raw_output}
 
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
@@ -234,19 +236,6 @@ h1 {
     font-size: 18px !important;
     font-weight: bold;
 }
-.purple-button button,
-.purple-button button:hover,
-.purple-button button:focus {
-    background-color: #a020f0 !important;
-    color: white !important;
-    font-weight: bold !important;
-    font-size: 16px !important;
-    padding: 10px 22px !important;
-    border-radius: 8px !important;
-    border: none !important;
-    box-shadow: none !important;
-    transition: background 0.3s ease-in-out;
-}
 """
 
 with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
@@ -260,7 +249,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
             expected_address = gr.Textbox(
                 label="Expected Address",
-                placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2"
+                placeholder="e.g., 145 Bay Street Toronto, ON M5J 2R7"
             )
 
     with gr.Row():
