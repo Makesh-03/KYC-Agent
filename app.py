@@ -45,7 +45,7 @@ def clean_address_mistral(raw_response, original_text=""):
     # Flatten and clean up initial formatting
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
     
-    # Remove section prefixes like '8.', '8)' '8:' from beginning
+    # Remove section prefixes like '8.', '8)', '8:' from beginning
     flattened = re.sub(r"^(?:\s*(\d{1,2}[\.\):])\s*)+", "", flattened)
     
     # Remove common misleading prefixes like "Section 8", "8.", "8)"
@@ -76,37 +76,29 @@ def extract_address_with_llm(text, model_choice):
         template = (
             "You are a strict document parser extracting Canadian addresses.\n\n"
             "Your task is to extract ONLY the full Canadian mailing address from the document text. The address must include:\n"
-            "- A house or building number (must be a standalone number like '2', '742', '38A' — NOT a prefixed section number like '8.', '8)', or 'Section 8:')\n"
+            "- A house or building number (must be a standalone number like '2', '742', '38A', NOT a prefixed section number like '8.' or '8)')\n"
             "- Street name\n"
             "- City or town\n"
             "- Province (use two-letter code like ON, NL)\n"
             "- Postal code (format: A1A 1A1)\n\n"
             "**IMPORTANT RULES:**\n"
-            "- The extracted address MUST begin with the actual street number.\n"
-            "- DO NOT include section numbers (e.g., '8.', '9.', '8)', '9)') or unrelated labels like 'Eyes:', 'Class:', 'Sex:', 'Section:', etc.\n"
-            "- Ignore numbers at the start of lines unless they are clearly part of the actual address.\n"
-            "- NEVER guess or hallucinate numbers like '8.2' — only use actual address data found in context.\n"
-            "- Do not return more than one line. No extra notes, bullet points, or labels.\n"
-            "- If multiple addresses exist, return the one most likely to be a Canadian residential or mailing address.\n"
-            "- If unsure between two addresses, pick the one closest to the format: Number Street, City, Province, Postal Code\n\n"
+            "- DO NOT include section numbers (e.g., '8.', '9.', '8)', '9)') or labels like 'Eyes:', 'Class:', etc.\n"
+            "- The address should begin with the actual building number (e.g., '2 Thorburn Road')\n"
+            "- Never assume or hallucinate building numbers like '8.2' if the actual number is just '2'.\n"
+            "- If multiple addresses exist, pick the one that is clearly a Canadian residential or mailing address.\n\n"
             "Return ONLY the address in one line. No extra words, explanations, or labels.\n\n"
-            "✅ Correct Example: 742 Evergreen Terrace, Ottawa, ON K1A 0B1\n"
-            "❌ Wrong Example: 8.2 Thorburn Road, St. Johns, NL A1B 3L7 (hallucinated number)\n\n"
-            "Text:\n{document_text}\n\n"
-            "Extracted Address:"
+            "Example Output:\n742 Evergreen Terrace, Ottawa, ON K1A 0B1\n\n"
+            "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
         template = (
             "Extract the full Canadian mailing address from the following text. "
-            "Include street number, street name, city, province (2-letter code), and postal code.\n\n"
-            "Only return the address in a single line without any extra info or labels.\n\n"
+            "Include street, city, province, and postal code.\n\n"
             "Text: {document_text}\n\nAddress:"
         )
-
     prompt = PromptTemplate(template=template, input_variables=["document_text"])
     chain = LLMChain(llm=get_llm(model_choice), prompt=prompt)
     result = chain.invoke({"document_text": text})
-
     return clean_address_mistral(result["text"].strip(), original_text=text) if model_choice == "Mistral" else result["text"].strip()
 
 def extract_kyc_fields(text, model_choice):
