@@ -71,12 +71,17 @@ def clean_address_mistral(raw_response, original_text=""):
 def extract_address_with_llm(text, model_choice):
     if model_choice == "Mistral":
         template = (
-            "You are extracting the full Canadian mailing address from an official government-issued document. "
-            "Make sure to include house/building number, street name, city, province, and postal code. "
-            "Only extract a complete and accurate Canadian address. Do not omit the house number or add extra content. "
-            "Do NOT return explanations, only the address as a single line. "
-            "Example format: 78 Bloor Street West, Toronto, ON M5S 1L5\n\n"
-            "Text:\n{document_text}\n\nExtracted Address:"
+            "You are extracting the full Canadian mailing address from a Canadian government-issued document such as a driver’s license or passport. "
+            "The address must contain all parts of a valid Canadian mailing address: a house/building number, street name, city, province (2-letter code), and a valid 6-character postal code in the A1A 1A1 format. "
+            "Do not skip or omit the house/building number. Do not return any section numbers, headings, or irrelevant content. "
+            "Only return the full address as a single line, with commas separating each part. Do not explain anything. "
+            "Example format: 221 King Street West, Toronto, ON M5H 1K5
+
+"
+            "Text:
+{document_text}
+
+Extracted Address:"
         )
     else:
         template = (
