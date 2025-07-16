@@ -16,12 +16,14 @@ model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
 # === UTILS ===
 def extract_text_from_file(file_path):
-    if file_path.endswith(".pdf"):
-        doc = fitz.open(file_path)
-        return "\n".join(page.get_text() for page in doc)
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
+        # Use partition_pdf if fitz (PyMuPDF) is not available
+        elements = partition_pdf(file_path)
+        return "\n".join([str(e) for e in elements])
     else:
         elements = partition(filename=file_path)
-        return "\n".join([el.text for el in elements if el.text.strip() != ""])
+        return "\n".join([el.text for el in elements if hasattr(el, "text") and el.text and el.text.strip() != ""])
 
 # === MISTRAL PROMPT FOR ADDRESS EXTRACTION ===
 address_prompt_template = (
@@ -219,7 +221,6 @@ Text:
                 "error": "Failed to parse KYC fields",
                 "raw_output": raw_output
             }
-# ...existing code...
 # === UI ===
 custom_css = """..."""  # Use your existing styled CSS here
 
