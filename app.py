@@ -136,7 +136,6 @@ Text:
     raw_output = result["text"].strip()
     try:
         fields = json.loads(raw_output)
-        # Clean the address field if it exists
         if "address" in fields and fields["address"] != "Not provided":
             fields["address"] = clean_address_mistral(fields["address"], original_text=text)
         return fields
@@ -170,7 +169,6 @@ Text:
                 "error": "No JSON block found",
                 "raw_output": raw_output
             }
-            # Clean the address field if it exists
             if "address" in fields and fields["address"] != "Not provided":
                 fields["address"] = clean_address_mistral(fields["address"], original_text=text)
             return fields
@@ -221,7 +219,7 @@ def verify_with_canada_post(address):
         return True, verified_address
     return False, address
 
-def kyc_multi_verify(files, expected_address, model_choice):
+def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
     if not files or len(files) < 2:
         return "❌ Please upload at least two documents.", {}, {}
     try:
@@ -245,7 +243,7 @@ def kyc_multi_verify(files, expected_address, model_choice):
             results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
             kyc_fields[f"document_{idx+1}"] = filter_non_null_fields(fields)
 
-        consistency_score, consistent = semantic_match(addresses[0], addresses[1])
+        consistency_score, consistent = semantic_match(addresses[0], addresses[1], threshold=consistency_threshold)
         avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
         results["document_consistency_score"] = round(consistency_score, 3)
         results["documents_consistent"] = consistent
@@ -292,7 +290,7 @@ h1 {
     font-weight: bold;
     margin-right: 10px;
 }
-.gr-textbox label, .gr-file label {
+.gr-textbox label, .gr-file label, .gr-slider label {
     font-size: 18px !important;
     font-weight: bold;
 }
@@ -303,6 +301,31 @@ h1 {
     font-size: 16px !important;
     padding: 10px 22px !important;
     border-radius: 8px !important;
+}
+.gr-slider input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 10px;
+    background: #d3d3d3;
+    outline: none;
+    border-radius: 5px;
+    margin-top: 10px;
+}
+.gr-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: #a020f0;
+    border-radius: 50%;
+    cursor: pointer;
+}
+.gr-slider input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    background: #a020f0;
+    border-radius: 50%;
+    cursor: pointer;
 }
 """
 
@@ -317,14 +340,16 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             expected_address = gr.Textbox(label="Expected Address", placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2")
             gr.Markdown("<span class='purple-circle'>3</span> **Select LLM Provider**")
             model_choice = gr.Dropdown(choices=["Mistral", "OpenAI"], value="Mistral", label="LLM Provider")
+            gr.Markdown("<span class='purple-circle'>4</span> **Set Consistency Threshold**")
+            consistency_threshold = gr.Slider(minimum=0.5, maximum=1.0, value=0.82, step=0.01, label="Consistency Threshold")
             verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>4</span> **KYC Verification Status**")
+            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Status**")
             status_html = gr.HTML()
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Details**")
+            gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
                 output_json = gr.JSON(label="KYC Output")
@@ -332,7 +357,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
                 document_info_json = gr.JSON(label="Document Fields")
     verify_btn.click(
         fn=kyc_multi_verify,
-        inputs=[file_inputs, expected_address, model_choice],
+        inputs=[file_inputs, expected_address, model_choice, consistency_threshold],
         outputs=[status_html, output_json, document_info_json]
     )
 
