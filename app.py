@@ -248,7 +248,6 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         results["document_consistency_score"] = round(consistency_score, 3)
         results["documents_consistent"] = consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
-        # Final result now strictly requires consistency score to meet or exceed the threshold
         results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and (consistency_score >= consistency_threshold)
 
         status = (
