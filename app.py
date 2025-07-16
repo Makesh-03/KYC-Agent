@@ -32,15 +32,11 @@ def extract_text_from_file(file_path):
     else:
         raise ValueError("Unsupported file type. Please upload a PDF or image.")
 
-    text = "
-".join([str(e) for e in elements])
+    # Corrected: join lines and print for debug
+    text = "\n".join([str(e) for e in elements])
 
     # DEBUG: print extracted text to diagnose missing numbers
-    print(f"
---- Extracted Text from {file_path} ---
-{text}
-----------------------------
-")
+    print(f"\n--- Extracted Text from {file_path} ---\n{text}\n----------------------------\n")
 
     return text"\n".join([str(e) for e in elements])
 
@@ -346,6 +342,10 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
         fn=kyc_multi_verify,
         inputs=[multi_file_input, expected_address, model_choice, strictness_slider],
         outputs=[status_html, output_json, document_info_json]
+    )
+
+if __name__ == "__main__":
+    iface.launch(share=True)
     )
 
 if __name__ == "__main__":
