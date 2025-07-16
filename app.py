@@ -42,22 +42,33 @@ def get_llm(model_choice):
     )
 
 def clean_address_mistral(raw_response, original_text=""):
+    # Flatten and clean up initial formatting
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
-    flattened = re.sub(r"^\s*(\d+[\.\-\):]?)\s*", "", flattened)
+    
+    # Remove section prefixes like '8.', '8)', '8:' from beginning
+    flattened = re.sub(r"^(?:\s*(\d{1,2}[\.\):])\s*)+", "", flattened)
+    
+    # Remove common misleading prefixes like "Section 8", "8.", "8)"
+    flattened = re.sub(r"(?i)section\s*\d{1,2}[\.\):]?\s*", "", flattened)
+
+    # Try primary address regex
     match = re.search(
-        r"\d{1,4}(?:[.\-]?\d+)?[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
+        r"\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
         re.IGNORECASE,
     )
     if match:
         return match.group(0).strip()
+
+    # Fallback: use original text
     fallback = re.search(
-        r"\d{1,4}(?:[.\-]?\d+)?[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
+        r"\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         original_text.replace("\n", " "),
         re.IGNORECASE,
     )
     if fallback:
         return fallback.group(0).strip()
+
     return flattened
 
 def extract_address_with_llm(text, model_choice):
