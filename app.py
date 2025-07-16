@@ -1,5 +1,7 @@
 # Full updated KYC Agent with Canada Post Authenticity Score (House Number Fix + Similarity Strictness Slider)
 
+# Full updated KYC Agent with Canada Post Authenticity Score (Anti-Hallucination Fix + Similarity Strictness Slider)
+
 import os
 import re
 import json
@@ -66,6 +68,16 @@ def clean_extracted_address(raw_response, original_text=""):
     return flattened
 
 def extract_address_with_llm(text, model_choice="OpenAI"):
+    # Try extracting directly via regex before LLM
+    regex_match = re.search(
+        r"\b\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d\b",
+        text.replace("\n", " "),
+        re.IGNORECASE
+    )
+    if regex_match:
+        return regex_match.group(0).strip()
+
+    # Otherwise, call LLM
     template = (
         "You are a strict document parser.\n"
         "Extract the full Canadian residential address from the scanned document text.\n"
@@ -83,6 +95,7 @@ def extract_address_with_llm(text, model_choice="OpenAI"):
     raw = result["text"].strip()
     cleaned = clean_extracted_address(raw, original_text=text)
     return cleaned
+
 
 def extract_kyc_fields(text, model_choice="OpenAI"):
     prompt_text = """
