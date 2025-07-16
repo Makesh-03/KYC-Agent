@@ -26,20 +26,21 @@ def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
 
 def extract_text_from_file(file_path):
+    import pytesseract
+    from PIL import Image
     ext = os.path.splitext(file_path)[1].lower()
+
     if ext == ".pdf":
         elements = partition_pdf(file_path)
+        text = "\n".join([str(e) for e in elements])
     elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
-        elements = partition_image(filename=file_path)
+        # Use pytesseract instead of unstructured.partition for better digit accuracy
+        image = Image.open(file_path)
+        text = pytesseract.image_to_string(image)
     else:
         raise ValueError("Unsupported file type. Please upload a PDF or image.")
 
-    # Corrected: join lines and print for debug
-    text = "\n".join([str(e) for e in elements])
-
-    # DEBUG: print extracted text to diagnose missing numbers
     print(f"\n--- Extracted Text from {file_path} ---\n{text}\n----------------------------\n")
-
     return text
 
 def get_llm(model_choice="OpenAI"):
@@ -345,6 +346,9 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
         inputs=[multi_file_input, expected_address, model_choice, strictness_slider],
         outputs=[status_html, output_json, document_info_json]
     )
+
+
+    
 
 if __name__ == "__main__":
     iface.launch(share=True)
