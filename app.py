@@ -15,7 +15,6 @@ similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
-# --- Helpers ---
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
 
@@ -31,7 +30,7 @@ def extract_text_from_file(file_path):
 
 def get_llm(model_choice):
     model_map = {
-        "Claude": "anthropic/claude-3-sonnet",
+        "Gemini": "google/gemini-pro",
         "OpenAI": "openai/gpt-4o"
     }
     if not OPENROUTER_API_KEY:
@@ -67,17 +66,13 @@ def clean_extracted_address(raw_response, original_text=""):
     return flattened
 
 def fix_malformed_house_number(address: str) -> str:
-    """
-    Fixes bad OCR cases like '8.2 THORBURN' → '2 THORBURN', etc.
-    Add more patterns if needed.
-    """
     corrected = re.sub(r"\b8\.2\s+", "2 ", address)
     return corrected
 
 def extract_address_with_llm(text, model_choice):
     template = (
-        "You are extracting a Canadian residential mailing address from a scanned document. "
-        "Return only the full address including: house/building number, street name, city, province (2-letter code), and postal code. "
+        "You are extracting a Canadian residential mailing address from a scanned government-issued document. "
+        "Return only a valid address that includes: building number, street name, city, province (2-letter code), and postal code. "
         "Do NOT hallucinate or split house numbers. Use digits as-is. "
         "Example format: 145 BAY STREET TORONTO, ON M5J 2R7\n\n"
         "Text:\n{document_text}\n\nExtracted Address:"
@@ -136,15 +131,29 @@ Text:
         # If the output is a valid JSON object, return it
         return json.loads(raw_output)
     except json.JSONDecodeError:
-        # Try to extract the first JSON object from the output
+        # Try to extract the first JSON object from the output, ignoring any leading/trailing text
         json_match = re.search(r'\{[\s\S]+\}', raw_output)
         if json_match:
             try:
                 return json.loads(json_match.group())
             except Exception:
                 pass
-        # As a last resort, return the raw output as a string for debugging
-        return {"error": "Failed to parse KYC fields", "raw_output": raw_output}
+        # Try to fix common LLM output issues: remove leading/trailing non-JSON lines
+        lines = raw_output.splitlines()
+        json_lines = []
+        inside_json = False
+        for line in lines:
+            if '{' in line:
+                inside_json = True
+            if inside_json:
+                json_lines.append(line)
+            if '}' in line and inside_json:
+                break
+        json_str = "\n".join(json_lines)
+        try:
+            return json.loads(json_str)
+        except Exception:
+            return {"error": "Failed to parse KYC fields", "raw_output": raw_output}
 
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
@@ -269,7 +278,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
         with gr.Column():
             gr.Markdown("<span class='purple-circle'>4</span> **Select LLM Provider**")
             model_choice = gr.Dropdown(
-                choices=["Claude", "OpenAI"], value="Claude", label="LLM Provider"
+                choices=["Gemini", "OpenAI"], value="Gemini", label="LLM Provider"
             )
             verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
 
