@@ -32,7 +32,7 @@ def extract_text_from_file(file_path):
 
 def get_llm(model_choice):
     model_map = {
-        "Mistral": "mistralai/Mistral-7B-Instruct-v0.2",
+        "Claude": "anthropic/claude-3-sonnet",
         "OpenAI": "openai/gpt-4o"
     }
     if not OPENROUTER_API_KEY:
@@ -45,14 +45,10 @@ def get_llm(model_choice):
         max_tokens=2000,
     )
 
-def clean_address_mistral(raw_response, original_text=""):
-    # Flatten and normalize text
+def clean_extracted_address(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
-
-    # Remove leading section numbers like "15.", "8)", "2-"
     flattened = re.sub(r"^\s*(\d+[\.\-\):]?)\s*", "", flattened)
 
-    # Try to extract valid Canadian address
     match = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
@@ -61,7 +57,6 @@ def clean_address_mistral(raw_response, original_text=""):
     if match:
         return match.group(0).strip()
 
-    # Fallback: try to extract from full OCR text
     fallback = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         original_text.replace("\n", " "),
@@ -73,35 +68,25 @@ def clean_address_mistral(raw_response, original_text=""):
     return flattened
 
 def extract_address_with_llm(text, model_choice):
-    if model_choice == "Mistral":
-        template = (
-            "You are extracting address information from Canadian government-issued documents such as a driver’s license. "
-            "The address is usually clearly marked and contains house/building number, street, city, province, and postal code. "
-            "Ignore any unrelated information like class, eye color, or restrictions. "
-            "Do NOT return anything unless it's a complete Canadian mailing address. "
-            "Return ONLY the address in a single line, no explanation or label.\n\n"
-            "Text:\n{document_text}\n\nExtracted Address:"
-        )
-    else:
-        template = (
-            "Extract the full Canadian mailing address from the following text. "
-            "Include street, city, province, and postal code.\n\n"
-            "Text: {document_text}\n\nAddress:"
-        )
-
+    template = (
+        "Extract the full Canadian mailing address from the following text. "
+        "Include house/building number, street, city, province, and postal code. "
+        "Do NOT return anything unless it's a complete Canadian mailing address. "
+        "Return ONLY the address in a single line, no explanation or label.\n\n"
+        "Text:\n{document_text}\n\nExtracted Address:"
+    )
     prompt = PromptTemplate(template=template, input_variables=["document_text"])
     llm = get_llm(model_choice)
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"document_text": text})
     raw = result["text"].strip()
-
-    return clean_address_mistral(raw, original_text=text) if model_choice == "Mistral" else raw
+    return clean_extracted_address(raw, original_text=text)
 
 def extract_kyc_fields(text, model_choice):
     prompt_text = """
 You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, driving license, national identity card, or any type of VISA document (including but not limited to tourist visas, work visas, student visas, resident visas, entry permits, e-visas, visa labels, or visa stamps). Use the visible field labels, visual structure, and document layout to capture the data, but do not invent fields or infer details that do not explicitly appear on the document. If any field is missing, set its value as null. Return ONLY the resulting JSON object (no explanation, no text before or after). Use this schema for the unified KYC data extraction:
 
-{{
+{
   "document_type": "string or null",
   "document_number": "string or null",
   "country_of_issue": "string or null",
@@ -125,13 +110,12 @@ You are an expert KYC document parser. Extract all relevant information from the
   "photo_base64": "string or null",
   "signature_base64": "string or null",
   "additional_info": "string or null"
-}}
+}
 
 Text:
 {text}
 """
     llm = get_llm(model_choice)
-    # Use template_format="f-string" to avoid curly brace parsing issues
     prompt = PromptTemplate(template=prompt_text, input_variables=["text"], template_format="f-string")
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"text": text})
@@ -285,7 +269,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
         with gr.Column():
             gr.Markdown("<span class='purple-circle'>4</span> **Select LLM Provider**")
             model_choice = gr.Dropdown(
-                choices=["Mistral", "OpenAI"], value="Mistral", label="LLM Provider"
+                choices=["Claude", "OpenAI"], value="Claude", label="LLM Provider"
             )
             verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
 
