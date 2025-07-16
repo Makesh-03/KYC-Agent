@@ -181,52 +181,45 @@ def verify_with_canada_post(address):
     data = response.json()
     return len(data.get("Items", [])) > 0
 
-def kyc_dual_verify(file1, file2, expected_address, model_choice="OpenAI"):
-    if file1 is None or file2 is None:
-        return "❌ Verification Failed: Please upload both documents.", {}, {}
+def kyc_multi_verify(files, expected_address, model_choice="OpenAI"):
+    if not files or len(files) < 2:
+        return "❌ Verification Failed: Please upload at least two documents.", {}, {}
 
     try:
-        text1 = extract_text_from_file(file1.name)
-        text2 = extract_text_from_file(file2.name)
-        address1 = extract_address_with_llm(text1, model_choice)
-        address2 = extract_address_with_llm(text2, model_choice)
+        extracted_addresses = []
+        kyc_data = {}
+        similarity_scores = []
+        canada_post_verifications = []
 
-        sim1, match1 = semantic_match(address1, expected_address)
-        sim2, match2 = semantic_match(address2, expected_address)
-        verified1 = verify_with_canada_post(address1)
-        verified2 = verify_with_canada_post(address2)
-        consistency_score, consistent = semantic_match(address1, address2)
+        for idx, file in enumerate(files[:3]):  # Limit to max 3
+            text = extract_text_from_file(file.name)
+            address = extract_address_with_llm(text, model_choice)
+            sim_score, match = semantic_match(address, expected_address)
+            verified = verify_with_canada_post(address)
+            kyc_fields = filter_non_null_fields(extract_kyc_fields(text, model_choice))
+
+            extracted_addresses.append(address)
+            similarity_scores.append((sim_score, match))
+            canada_post_verifications.append(verified)
+            kyc_data[f"document_{idx+1}"] = kyc_fields
+
+        consistency_score, consistent = semantic_match(extracted_addresses[0], extracted_addresses[1])
         percent_score = int(round(consistency_score * 100))
+        passed = all(m for _, m in similarity_scores) and all(canada_post_verifications) and consistent
 
-        kyc_fields_1 = filter_non_null_fields(extract_kyc_fields(text1, model_choice))
-        kyc_fields_2 = filter_non_null_fields(extract_kyc_fields(text2, model_choice))
-
-        kyc_combined = {
-            "first_document": kyc_fields_1,
-            "second_document": kyc_fields_2
-        }
-
-        passed = all([match1, match2, verified1, verified2, consistent])
         verification_result = {
-            "extracted_address_1": address1,
-            "extracted_address_2": address2,
-            "similarity_to_expected_1": round(sim1, 3),
-            "similarity_to_expected_2": round(sim2, 3),
-            "address_match_1": match1,
-            "address_match_2": match2,
-            "canada_post_verified_1": verified1,
-            "canada_post_verified_2": verified2,
+            "extracted_addresses": extracted_addresses,
+            "similarity_scores_to_expected": [round(s, 3) for s, _ in similarity_scores],
+            "address_matches": [m for _, m in similarity_scores],
+            "canada_post_verified": canada_post_verifications,
             "document_consistency_score": round(consistency_score, 3),
             "documents_consistent": consistent,
             "final_result": passed
         }
 
-        if passed:
-            status = f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{percent_score}%</b>"
-        else:
-            status = f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{percent_score}%</b>"
+        status = f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{percent_score}%</b>" if passed else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{percent_score}%</b>"
 
-        return status, verification_result, kyc_combined
+        return status, verification_result, kyc_data
 
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
@@ -273,8 +266,8 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>1</span> **Upload Document 1 (e.g., License)**")
-            file_input_1 = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="Document 1")
+            gr.Markdown("<span class='purple-circle'>1</span> **Upload 2 or 3 Documents (e.g., License, Cheque)**")
+            multi_file_input = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="KYC Documents", file_count="multiple")
         with gr.Column():
             gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
             expected_address = gr.Textbox(
@@ -284,22 +277,19 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>3</span> **Upload Document 2 (e.g., Void Cheque)**")
-            file_input_2 = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="Document 2")
-        with gr.Column():
-            gr.Markdown("<span class='purple-circle'>4</span> **LLM Provider (OpenAI GPT-4o only)**")
-            model_choice = gr.Textbox(value="OpenAI", visible=False)  # fixed choice
+            gr.Markdown("<span class='purple-circle'>3</span> **LLM Provider (OpenAI GPT-4o only)**")
+            model_choice = gr.Textbox(value="OpenAI", visible=False)
 
             verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Status**")
+            gr.Markdown("<span class='purple-circle'>4</span> **KYC Verification Status**")
             status_html = gr.HTML()
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
+            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Details**")
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
                 output_json = gr.JSON(label="KYC Output")
@@ -308,8 +298,8 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
                     document_info_json = gr.JSON(label="Document Fields")
 
     verify_btn.click(
-        fn=kyc_dual_verify,
-        inputs=[file_input_1, file_input_2, expected_address, model_choice],
+        fn=kyc_multi_verify,
+        inputs=[multi_file_input, expected_address, model_choice],
         outputs=[status_html, output_json, document_info_json]
     )
 
