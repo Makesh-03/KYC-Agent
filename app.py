@@ -45,6 +45,7 @@ def get_llm(model_choice="OpenAI"):
 def clean_extracted_address(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
     flattened = re.sub(r"^\s*[\•\-–—]?\s*", "", flattened)
+    flattened = re.sub(r"\b\d+\.\d+\b", "", flattened)  # remove hallucinated decimal house numbers
 
     match = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
@@ -66,9 +67,12 @@ def clean_extracted_address(raw_response, original_text=""):
 
 def extract_address_with_llm(text, model_choice="OpenAI"):
     template = (
-        "Extract the full Canadian residential address from the scanned document text. "
-        "Include the house number (don't skip it), street name, city, province (2-letter code), and postal code. "
-        "Use only information present in the text. Do not guess or omit digits. Avoid hallucination. "
+        "You are a strict document parser.\n"
+        "Extract the full Canadian residential address from the scanned document text.\n"
+        "Include house number, street name, city, province (2-letter code), and postal code.\n"
+        "DO NOT add or guess any values. Only extract exactly what appears in the document.\n"
+        "DO NOT hallucinate house numbers or add extra numbers like '8.2'.\n"
+        "Use digits as-is. No decimals. No approximations.\n"
         "Format: 145 BAY STREET TORONTO, ON M5J 2R7\n\n"
         "Text:\n{document_text}\n\nExtracted Address:"
     )
