@@ -45,24 +45,24 @@ def clean_address_mistral(raw_response, original_text=""):
     # Flatten and clean up initial formatting
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
     
-    # Remove section prefixes like '8.', '8)', '8:' from beginning
-    flattened = re.sub(r"^(?:\s*(\d{1,2}[\.\):])\s*)+", "", flattened)
+    # Remove section prefixes like '8.', '8.2', '8)', '9:', etc. from the beginning
+    flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d)?[\.\):])\s*)+", "", flattened)
     
-    # Remove common misleading prefixes like "Section 8", "8.", "8)"
-    flattened = re.sub(r"(?i)section\s*\d{1,2}[\.\):]?\s*", "", flattened)
+    # Remove common misleading prefixes like "Section 8", "8.", "8.2)"
+    flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d)?[\.\):]?\s*", "", flattened)
 
-    # Try primary address regex
+    # Try primary address regex: Ensure it starts with a standalone number followed by street details
     match = re.search(
-        r"\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
+        r"^\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
         re.IGNORECASE,
     )
     if match:
         return match.group(0).strip()
 
-    # Fallback: use original text
+    # Fallback: use original text with stricter address pattern
     fallback = re.search(
-        r"\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
+        r"^\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         original_text.replace("\n", " "),
         re.IGNORECASE,
     )
