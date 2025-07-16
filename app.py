@@ -230,11 +230,12 @@ custom_css = """
     background-color: #a020f0 !important;
     color: white !important;
     font-weight: bold !important;
-    font-size: 16px !important;
-    padding: 8px 20px !important;
-    border-radius: 6px !important;
+    font-size: 13px !important;
+    padding: 4px 14px !important;
+    border-radius: 5px !important;
     border: none !important;
 }
+
 h1 {
     font-size: 42px !important;
     font-weight: 900 !important;
