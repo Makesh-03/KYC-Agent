@@ -23,15 +23,19 @@ def filter_non_null_fields(data):
 def extract_text_from_file(file_path):
     if not UNSTRUCTURED_API_KEY:
         raise ValueError("UNSTRUCTURED_API_KEY is not set.")
-    elements = partition_via_api(
-        filename=file_path,
-        api_key=UNSTRUCTURED_API_KEY,
-        api_url=UNSTRUCTURED_API_URL,
-        strategy="auto",
-    )
-    text = "\n".join([str(e) for e in elements])
-    print(f"\n--- Extracted Text from {file_path} ---\n{text}\n----------------------------\n")
-    return text
+    try:
+        elements = partition_via_api(
+            filename=file_path,
+            api_key=UNSTRUCTURED_API_KEY,
+            api_url=UNSTRUCTURED_API_URL,
+            strategy="auto",
+        )
+        text = "\n".join([str(e) for e in elements])
+        print(f"\n--- Extracted Text from {file_path} ---\n{text}\n----------------------------\n")
+        return text
+    except Exception as e:
+        print(f"❌ Error: API error occurred: {e}")
+        return "❌ Error: Unable to extract text. Please check your Unstructured API key/subscription."
 
 def get_llm(model_choice="OpenAI"):
     if not OPENROUTER_API_KEY:
