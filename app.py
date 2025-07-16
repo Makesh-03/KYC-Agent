@@ -91,7 +91,8 @@ def extract_address_with_llm(text, model_choice):
     prompt = PromptTemplate(template=template, input_variables=["document_text"])
     chain = LLMChain(llm=get_llm(model_choice), prompt=prompt)
     result = chain.invoke({"document_text": text})
-    return clean_address_mistral(result["text"].strip(), original_text=text) if model_choice == "Mistral" else result["text"].strip()
+    # Apply the same cleaning logic to OpenAI output as Mistral
+    return clean_address_mistral(result["text"].strip(), original_text=text)
 
 def extract_kyc_fields(text, model_choice):
     template = """
@@ -209,7 +210,6 @@ def verify_with_canada_post(address):
     )
     items = response.json().get("Items", [])
     if items:
-        # Use the first matched address as the verified address
         verified_address = items[0].get("Text", address)
         return True, verified_address
     return False, address
@@ -227,7 +227,6 @@ def kyc_multi_verify(files, expected_address, model_choice):
             address = extract_address_with_llm(text, model_choice)
             sim, match = semantic_match(address, expected_address)
             verified, canada_post_address = verify_with_canada_post(address)
-            # Calculate authenticity score based on similarity to Canada Post address
             auth_score, _ = semantic_match(address, canada_post_address)
             authenticity_scores.append(auth_score)
             fields = extract_kyc_fields(text, model_choice)
