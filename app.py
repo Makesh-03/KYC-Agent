@@ -1,4 +1,3 @@
-# ... (imports remain unchanged)
 import os
 import re
 import json
@@ -16,6 +15,7 @@ similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
+# --- Helpers ---
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
 
@@ -66,12 +66,20 @@ def clean_extracted_address(raw_response, original_text=""):
 
     return flattened
 
+def fix_malformed_house_number(address: str) -> str:
+    """
+    Fixes bad OCR cases like '8.2 THORBURN' → '2 THORBURN', etc.
+    Add more patterns if needed.
+    """
+    corrected = re.sub(r"\b8\.2\s+", "2 ", address)
+    return corrected
+
 def extract_address_with_llm(text, model_choice):
     template = (
-        "You are extracting a Canadian residential mailing address from an OCR-scanned government-issued document. "
-        "Return only a valid address that includes ONLY: building number, street name, city, province (2-letter code), and postal code. "
-        "Do NOT include floating-point numbers or decimals. Use digits as-is. "
-        "Format strictly like this: 145 BAY STREET TORONTO, ON M5J 2R7\n\n"
+        "You are extracting a Canadian residential mailing address from a scanned document. "
+        "Return only the full address including: house/building number, street name, city, province (2-letter code), and postal code. "
+        "Do NOT hallucinate or split house numbers. Use digits as-is. "
+        "Example format: 145 BAY STREET TORONTO, ON M5J 2R7\n\n"
         "Text:\n{document_text}\n\nExtracted Address:"
     )
     prompt = PromptTemplate(template=template, input_variables=["document_text"])
@@ -79,11 +87,13 @@ def extract_address_with_llm(text, model_choice):
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"document_text": text})
     raw = result["text"].strip()
-    return clean_extracted_address(raw, original_text=text)
+    cleaned = clean_extracted_address(raw, original_text=text)
+    fixed = fix_malformed_house_number(cleaned)
+    return fixed
 
 def extract_kyc_fields(text, model_choice):
     prompt_text = """
-You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, driving license, national identity card, or any type of VISA document (including but not limited to tourist visas, work visas, student visas, resident visas, entry permits, e-visas, visa labels, or visa stamps). Use the visible field labels, visual structure, and document layout to capture the data, but do not invent fields or infer details that do not explicitly appear on the document. If any field is missing, set its value as null. Return ONLY the resulting JSON object (no explanation, no text before or after). Use this schema for the unified KYC data extraction:
+You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, license, visa, etc. Return ONLY the resulting JSON object. If any field is missing, set it as null.
 
 {{
   "document_type": "string or null",
@@ -249,7 +259,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
             expected_address = gr.Textbox(
                 label="Expected Address",
-                placeholder="e.g., 145 Bay Street Toronto, ON M5J 2R7"
+                placeholder="e.g., 145 BAY STREET TORONTO, ON M5J 2R7"
             )
 
     with gr.Row():
