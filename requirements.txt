@@ -1,28 +1,27 @@
+deepface
 gradio
-sentence-transformers
-torch
-unstructured[local-inference]
-requests
-pdfminer.six
+langchain==0.1.16
+langchain-community
+langchain-huggingface
+langchain-openai
+nltk==3.8.1
+openai==1.21.0
+opencv-python-headless
+pdf2image
+pdfminer.six>=20221105
 pillow-heif
 pi-heif
-unstructured-inference
-pdf2image
-pytesseract
-langchain==0.1.16
-langchain-huggingface
-langchain-community
-openai==1.21.0
 PyMuPDF
-deepface
-tf-keras
-opencv-python-headless
+pytesseract
+requests
+sentence-transformers
 tensorflow<2.14
 tf-keras
+torch
 transformers==4.40.1
-pdfminer.six==20221105
-nltk==3.8.1
-langchain-openai
+unstructured[pdf]
+unstructured-inference
+
 
 # Note: The error is not related to missing packages.
 # It is due to an invalid model ID in your code or API call.
