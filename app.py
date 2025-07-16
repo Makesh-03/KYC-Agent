@@ -7,13 +7,14 @@ from sentence_transformers import SentenceTransformer, util
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain.chat_models import ChatOpenAI
-from unstructured.partition.api import partition_via_api  # Use Unstructured API instead
+from unstructured.partition.api import partition_via_api
 
 # --- Config ---
 similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 UNSTRUCTURED_API_KEY = os.getenv("UNSTRUCTURED_API_KEY")
+UNSTRUCTURED_API_URL = "https://llmwhisperer-api.us-central.unstract.com/api/v2"
 
 # --- Helpers ---
 def filter_non_null_fields(data):
@@ -22,10 +23,10 @@ def filter_non_null_fields(data):
 def extract_text_from_file(file_path):
     if not UNSTRUCTURED_API_KEY:
         raise ValueError("UNSTRUCTURED_API_KEY is not set.")
-
     elements = partition_via_api(
         filename=file_path,
         api_key=UNSTRUCTURED_API_KEY,
+        api_url=UNSTRUCTURED_API_URL,
         strategy="auto",
     )
     text = "\n".join([str(e) for e in elements])
@@ -47,7 +48,6 @@ def clean_extracted_address(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
     flattened = re.sub(r"^\s*[\•\-–—]?\s*", "", flattened)
     flattened = re.sub(r"\b\d+\.\d+\b", "", flattened)
-
     match = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
@@ -55,7 +55,6 @@ def clean_extracted_address(raw_response, original_text=""):
     )
     if match:
         return match.group(0).strip()
-
     fallback = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         original_text.replace("\n", " "),
@@ -63,7 +62,6 @@ def clean_extracted_address(raw_response, original_text=""):
     )
     if fallback:
         return fallback.group(0).strip()
-
     return flattened
 
 def extract_address_with_llm(text, model_choice="OpenAI"):
@@ -96,7 +94,7 @@ def extract_kyc_fields(text, model_choice="OpenAI"):
     prompt_text = """
 You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, license, visa, etc. Return ONLY the resulting JSON object. If any field is missing, set it as null.
 
-{{
+{
   "document_type": "string or null",
   "document_number": "string or null",
   "country_of_issue": "string or null",
@@ -120,7 +118,7 @@ You are an expert KYC document parser. Extract all relevant information from the
   "photo_base64": "string or null",
   "signature_base64": "string or null",
   "additional_info": "string or null"
-}}
+}
 
 Text:
 {text}
@@ -130,7 +128,6 @@ Text:
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"text": text})
     raw_output = result["text"].strip()
-
     try:
         return json.loads(raw_output)
     except json.JSONDecodeError:
@@ -183,16 +180,12 @@ def semantic_match(text1, text2, threshold=0.82):
 def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
         return False, None, 0
-
     url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
-    response = requests.get(
-        url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
-    )
+    response = requests.get(url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"})
     data = response.json()
     items = data.get("Items", [])
     if not items:
         return False, None, 0
-
     top_result = items[0].get("Text", "")
     score, _ = semantic_match(address, top_result)
     return True, top_result, int(round(score * 100))
@@ -200,7 +193,6 @@ def verify_with_canada_post(address):
 def kyc_multi_verify(files, expected_address, model_choice="OpenAI", strictness=0.82):
     if not files or len(files) < 2:
         return "❌ Verification Failed: Please upload at least two documents.", {}, {}
-
     try:
         extracted_addresses, kyc_data = [], {}
         similarity_scores, canada_post_verifications = [], []
@@ -244,7 +236,7 @@ def kyc_multi_verify(files, expected_address, model_choice="OpenAI", strictness=
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
 
-# --- UI ---
+# --- UI Layout ---
 custom_css = """
 .purple-small {
     background-color: #a020f0 !important;
@@ -296,6 +288,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
         with gr.Column():
             gr.Markdown("<span class='purple-circle'>3</span> **Similarity Strictness (Adjust Sensitivity)**")
             strictness_slider = gr.Slider(minimum=0.6, maximum=0.95, step=0.01, value=0.82, label="Similarity Strictness Threshold")
+
         with gr.Column():
             model_choice = gr.Textbox(value="OpenAI", visible=False)
             verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
