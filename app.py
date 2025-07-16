@@ -29,16 +29,12 @@ def extract_text_from_file(file_path):
         raise ValueError("Unsupported file type. Please upload a PDF or image.")
     return "\n".join([str(e) for e in elements])
 
-def get_llm(model_choice):
-    model_map = {
-        "OpenAI": "openai/gpt-4o",
-        "LLaMA": "meta-llama/llama-3-70b-instruct"
-    }
+def get_llm(model_choice="OpenAI"):
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY is not set.")
     return ChatOpenAI(
         temperature=0.2,
-        model_name=model_map[model_choice],
+        model_name="openai/gpt-4o",
         base_url="https://openrouter.ai/api/v1",
         openai_api_key=OPENROUTER_API_KEY,
         max_tokens=2000,
@@ -66,8 +62,7 @@ def clean_extracted_address(raw_response, original_text=""):
 
     return flattened
 
-# ✅ Updated extract_address_with_llm with LLaMA fix
-def extract_address_with_llm(text, model_choice):
+def extract_address_with_llm(text, model_choice="OpenAI"):
     template = (
         "Extract the full Canadian residential address from the scanned document text. "
         "Include only the house number, street name, city, province (2-letter code), and postal code. "
@@ -81,15 +76,9 @@ def extract_address_with_llm(text, model_choice):
     result = chain.invoke({"document_text": text})
     raw = result["text"].strip()
     cleaned = clean_extracted_address(raw, original_text=text)
-
-    # 🛠️ Fix hallucinated house number specific to LLaMA
-    if model_choice == "LLaMA":
-        if "8.2 THORBURN ROAD" in cleaned.upper():
-            cleaned = cleaned.upper().replace("8.2", "2")
-
     return cleaned
 
-def extract_kyc_fields(text, model_choice):
+def extract_kyc_fields(text, model_choice="OpenAI"):
     prompt_text = """
 You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, license, visa, etc. Return ONLY the resulting JSON object. If any field is missing, set it as null.
 
@@ -123,7 +112,6 @@ Text:
 {text}
 """
     llm = get_llm(model_choice)
-    # Use template_format="f-string" to avoid curly brace parsing issues
     prompt = PromptTemplate(template=prompt_text, input_variables=["text"], template_format="f-string")
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"text": text})
@@ -131,7 +119,6 @@ Text:
 
     # Try to extract JSON from the LLM output robustly
     try:
-        # If the output is a valid JSON object, return it
         return json.loads(raw_output)
     except json.JSONDecodeError:
         # Try to extract the first JSON object from the output, ignoring any leading/trailing text
@@ -150,7 +137,7 @@ Text:
                 return json.loads(json_str)
             except Exception:
                 pass
-        # As a last resort, return a dict with all fields set to null
+        # Always return all fields (with null) if parsing fails
         return {
             "document_type": None,
             "document_number": None,
@@ -194,7 +181,7 @@ def verify_with_canada_post(address):
     data = response.json()
     return len(data.get("Items", [])) > 0
 
-def kyc_dual_verify(file1, file2, expected_address, model_choice):
+def kyc_dual_verify(file1, file2, expected_address, model_choice="OpenAI"):
     if file1 is None or file2 is None:
         return "❌ Verification Failed: Please upload both documents.", {}, {}
 
@@ -300,10 +287,9 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             gr.Markdown("<span class='purple-circle'>3</span> **Upload Document 2 (e.g., Void Cheque)**")
             file_input_2 = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="Document 2")
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>4</span> **Select LLM Provider**")
-            model_choice = gr.Dropdown(
-                choices=["OpenAI", "LLaMA"], value="OpenAI", label="LLM Provider"
-            )
+            gr.Markdown("<span class='purple-circle'>4</span> **LLM Provider (OpenAI GPT-4o only)**")
+            model_choice = gr.Textbox(value="OpenAI", visible=False)  # fixed choice
+
             verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
 
     with gr.Row():
