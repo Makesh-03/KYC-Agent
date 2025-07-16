@@ -1,3 +1,5 @@
+# Full updated KYC Agent with Canada Post Authenticity Score
+
 import os
 import re
 import json
@@ -82,7 +84,7 @@ def extract_kyc_fields(text, model_choice="OpenAI"):
     prompt_text = """
 You are an expert KYC document parser. Extract all relevant information from the provided document, regardless of whether it is a passport, license, visa, etc. Return ONLY the resulting JSON object. If any field is missing, set it as null.
 
-{{
+{
   "document_type": "string or null",
   "document_number": "string or null",
   "country_of_issue": "string or null",
@@ -106,7 +108,7 @@ You are an expert KYC document parser. Extract all relevant information from the
   "photo_base64": "string or null",
   "signature_base64": "string or null",
   "additional_info": "string or null"
-}}
+}
 
 Text:
 {text}
@@ -117,54 +119,17 @@ Text:
     result = chain.invoke({"text": text})
     raw_output = result["text"].strip()
 
-    # Try to extract JSON from the LLM output robustly
     try:
         return json.loads(raw_output)
     except json.JSONDecodeError:
-        # Try to extract the first JSON object from the output, ignoring any leading/trailing text
         json_match = re.search(r'\{[\s\S]+\}', raw_output)
         if json_match:
             try:
                 return json.loads(json_match.group())
-            except Exception:
-                pass
-        # Try to fix common LLM output issues: remove lines before the first '{' and after the last '}'
-        start = raw_output.find('{')
-        end = raw_output.rfind('}')
-        if start != -1 and end != -1 and end > start:
-            json_str = raw_output[start:end+1]
-            try:
-                return json.loads(json_str)
-            except Exception:
-                pass
-        # Always return all fields (with null) if parsing fails
-        return {
-            "document_type": None,
-            "document_number": None,
-            "country_of_issue": None,
-            "issuing_authority": None,
-            "full_name": None,
-            "first_name": None,
-            "middle_name": None,
-            "last_name": None,
-            "gender": None,
-            "date_of_birth": None,
-            "place_of_birth": None,
-            "nationality": None,
-            "address": None,
-            "date_of_issue": None,
-            "date_of_expiry": None,
-            "blood_group": None,
-            "personal_id_number": None,
-            "father_name": None,
-            "mother_name": None,
-            "marital_status": None,
-            "photo_base64": None,
-            "signature_base64": None,
-            "additional_info": None,
-            "error": "Failed to parse KYC fields",
-            "raw_output": raw_output
-        }
+            except:
+                return {"error": "Failed to parse cleaned JSON block"}
+        else:
+            return {"error": "No JSON block found in response"}
 
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
@@ -173,13 +138,21 @@ def semantic_match(text1, text2, threshold=0.82):
 
 def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
-        return False
+        return False, None, 0
+
     url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
     response = requests.get(
         url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
     )
     data = response.json()
-    return len(data.get("Items", [])) > 0
+    items = data.get("Items", [])
+
+    if not items:
+        return False, None, 0
+
+    top_result = items[0].get("Text", "")
+    score, _ = semantic_match(address, top_result)
+    return True, top_result, int(round(score * 100))
 
 def kyc_multi_verify(files, expected_address, model_choice="OpenAI"):
     if not files or len(files) < 2:
@@ -190,17 +163,21 @@ def kyc_multi_verify(files, expected_address, model_choice="OpenAI"):
         kyc_data = {}
         similarity_scores = []
         canada_post_verifications = []
+        suggested_addresses = []
+        authenticity_scores = []
 
-        for idx, file in enumerate(files[:3]):  # Limit to max 3
+        for idx, file in enumerate(files[:3]):
             text = extract_text_from_file(file.name)
             address = extract_address_with_llm(text, model_choice)
             sim_score, match = semantic_match(address, expected_address)
-            verified = verify_with_canada_post(address)
+            verified, suggested_address, authenticity_score = verify_with_canada_post(address)
             kyc_fields = filter_non_null_fields(extract_kyc_fields(text, model_choice))
 
             extracted_addresses.append(address)
             similarity_scores.append((sim_score, match))
             canada_post_verifications.append(verified)
+            suggested_addresses.append(suggested_address)
+            authenticity_scores.append(authenticity_score)
             kyc_data[f"document_{idx+1}"] = kyc_fields
 
         consistency_score, consistent = semantic_match(extracted_addresses[0], extracted_addresses[1])
@@ -209,6 +186,8 @@ def kyc_multi_verify(files, expected_address, model_choice="OpenAI"):
 
         verification_result = {
             "extracted_addresses": extracted_addresses,
+            "suggested_canada_post_addresses": suggested_addresses,
+            "authenticity_scores": authenticity_scores,
             "similarity_scores_to_expected": [round(s, 3) for s, _ in similarity_scores],
             "address_matches": [m for _, m in similarity_scores],
             "canada_post_verified": canada_post_verifications,
@@ -223,6 +202,8 @@ def kyc_multi_verify(files, expected_address, model_choice="OpenAI"):
 
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
+
+# UI definition remains unchanged — connect this logic to your existing Gradio layout
 
 # --- UI ---
 custom_css = """
