@@ -221,7 +221,7 @@ def verify_with_canada_post(address):
 
 def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
     if not files or len(files) < 2:
-        return "❌ Please upload at least two documents.", {}, {}
+        return "❌ Please upload at least two documents.", [], []
     try:
         results = {}
         kyc_fields = {}
@@ -248,17 +248,40 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         results["document_consistency_score"] = round(consistency_score, 3)
         results["documents_consistent"] = consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
-        # Final result now strictly requires consistency score to meet or exceed the threshold
         results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and (consistency_score >= consistency_threshold)
+
+        # Prepare table data for KYC Output
+        kyc_output_data = [
+            ["Metric", "Value"],
+            ["Consistency Score", f"{int(round(consistency_score * 100))}%"],
+            ["Documents Consistent", str(consistent)],
+            ["Average Authenticity Score", f"{int(round(avg_authenticity_score * 100))}%"],
+            ["Final Result", "Passed" if results["final_result"] else "Failed"]
+        ]
+
+        # Prepare table data for Document Details
+        doc_details_data = []
+        for idx in range(len(files)):
+            doc_data = [
+                ["Field", "Document " + str(idx + 1)],
+                ["Extracted Address", results[f"extracted_address_{idx+1}"]],
+                ["Similarity to Expected", str(results[f"similarity_to_expected_{idx+1}"])],
+                ["Address Match", str(results[f"address_match_{idx+1}"])],
+                ["Canada Post Verified", str(results[f"canada_post_verified_{idx+1}"])],
+                ["Authenticity Score", str(results[f"authenticity_score_{idx+1}"])],
+                ["Full Name", kyc_fields[f"document_{idx+1}"].get("full_name", "Not provided")],
+                ["Address", kyc_fields[f"document_{idx+1}"].get("address", "Not provided")]
+            ]
+            doc_details_data.append(doc_data)
 
         status = (
             f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
             if results["final_result"]
             else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
-        return status, results, kyc_fields
+        return status, kyc_output_data, doc_details_data
     except Exception as e:
-        return f"❌ Error: {str(e)}", {}, {}
+        return f"❌ Error: {str(e)}", [], []
 
 # --- UI ---
 custom_css = """
@@ -291,7 +314,7 @@ h1 {
     font-weight: bold;
     margin-right: 10px;
 }
-.gr-textbox label, .gr-file label, .gr-slider label {
+.gr-textbox label, .gr-file label, .gr-slider label, .gr-dataframe label {
     font-size: 18px !important;
     font-weight: bold;
 }
@@ -353,13 +376,13 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
-                output_json = gr.JSON(label="KYC Output")
+                output_table = gr.Dataframe(label="KYC Output")
                 gr.Markdown("### Extracted Document Details")
-                document_info_json = gr.JSON(label="Document Fields")
+                document_tables = [gr.Dataframe(label=f"Document {i+1} Details") for i in range(2)]  # Support up to 2 documents
     verify_btn.click(
         fn=kyc_multi_verify,
         inputs=[file_inputs, expected_address, model_choice, consistency_threshold],
-        outputs=[status_html, output_json, document_info_json]
+        outputs=[status_html, output_table] + document_tables
     )
 
 if __name__ == "__main__":
