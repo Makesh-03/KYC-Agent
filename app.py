@@ -4,38 +4,38 @@ import json
 import requests
 import gradio as gr
 from sentence_transformers import SentenceTransformer, util
+from unstructured.partition.pdf import partition_pdf
+from unstructured.partition.image import partition_image
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain.chat_models import ChatOpenAI
-from unstructured.partition.api import partition_via_api
 
 # --- Config ---
 similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
-UNSTRUCTURED_API_KEY = os.getenv("UNSTRUCTURED_API_KEY")
-UNSTRUCTURED_API_URL = "https://llmwhisperer-api.us-central.unstract.com/api/v2"
 
 # --- Helpers ---
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
 
 def extract_text_from_file(file_path):
-    if not UNSTRUCTURED_API_KEY:
-        raise ValueError("UNSTRUCTURED_API_KEY is not set.")
-    try:
-        elements = partition_via_api(
-            filename=file_path,
-            api_key=UNSTRUCTURED_API_KEY,
-            api_url=UNSTRUCTURED_API_URL,
-            strategy="auto",
-        )
+    import pytesseract
+    from PIL import Image
+    ext = os.path.splitext(file_path)[1].lower()
+
+    if ext == ".pdf":
+        elements = partition_pdf(file_path)
         text = "\n".join([str(e) for e in elements])
-        print(f"\n--- Extracted Text from {file_path} ---\n{text}\n----------------------------\n")
-        return text
-    except Exception as e:
-        print(f"❌ Error: API error occurred: {e}")
-        return "❌ Error: Unable to extract text. Please check your Unstructured API key/subscription."
+    elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
+        # Use pytesseract instead of unstructured.partition for better digit accuracy
+        image = Image.open(file_path)
+        text = pytesseract.image_to_string(image)
+    else:
+        raise ValueError("Unsupported file type. Please upload a PDF or image.")
+
+    print(f"\n--- Extracted Text from {file_path} ---\n{text}\n----------------------------\n")
+    return text
 
 def get_llm(model_choice="OpenAI"):
     if not OPENROUTER_API_KEY:
@@ -51,7 +51,8 @@ def get_llm(model_choice="OpenAI"):
 def clean_extracted_address(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
     flattened = re.sub(r"^\s*[\•\-–—]?\s*", "", flattened)
-    flattened = re.sub(r"\b\d+\.\d+\b", "", flattened)
+    flattened = re.sub(r"\b\d+\.\d+\b", "", flattened)  # remove hallucinated decimal house numbers
+
     match = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
@@ -59,6 +60,7 @@ def clean_extracted_address(raw_response, original_text=""):
     )
     if match:
         return match.group(0).strip()
+
     fallback = re.search(
         r"\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         original_text.replace("\n", " "),
@@ -66,9 +68,11 @@ def clean_extracted_address(raw_response, original_text=""):
     )
     if fallback:
         return fallback.group(0).strip()
+
     return flattened
 
 def extract_address_with_llm(text, model_choice="OpenAI"):
+    # Try extracting directly via regex before LLM
     regex_match = re.search(
         r"\b\d{1,5}[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d\b",
         text.replace("\n", " "),
@@ -77,6 +81,7 @@ def extract_address_with_llm(text, model_choice="OpenAI"):
     if regex_match:
         return regex_match.group(0).strip()
 
+    # Otherwise, call LLM
     template = (
         "You are a strict document parser.\n"
         "Extract the full Canadian residential address from the scanned document text.\n"
@@ -92,7 +97,10 @@ def extract_address_with_llm(text, model_choice="OpenAI"):
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"document_text": text})
     raw = result["text"].strip()
-    return clean_extracted_address(raw, original_text=text)
+    cleaned = clean_extracted_address(raw, original_text=text)
+    return cleaned
+
+
 
 def extract_kyc_fields(text, model_choice="OpenAI"):
     prompt_text = """
@@ -132,20 +140,25 @@ Text:
     chain = LLMChain(llm=llm, prompt=prompt)
     result = chain.invoke({"text": text})
     raw_output = result["text"].strip()
+
+    # Try to extract JSON from the LLM output robustly
     try:
         return json.loads(raw_output)
     except json.JSONDecodeError:
+        # Try to extract the first JSON object from the output, ignoring any leading/trailing text
         json_match = re.search(r'\{[\s\S]+\}', raw_output)
         if json_match:
             try:
                 return json.loads(json_match.group())
             except Exception:
                 pass
+        # Try to fix common LLM output issues: remove lines before the first '{' and after the last '}'
         start = raw_output.find('{')
         end = raw_output.rfind('}')
         if start != -1 and end != -1 and end > start:
+            json_str = raw_output[start:end+1]
             try:
-                return json.loads(raw_output[start:end+1])
+                return json.loads(json_str)
             except Exception:
                 pass
         # Always return all fields (with null) if parsing fails
@@ -185,12 +198,17 @@ def semantic_match(text1, text2, threshold=0.82):
 def verify_with_canada_post(address):
     if not CANADA_POST_API_KEY:
         return False, None, 0
+
     url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
-    response = requests.get(url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"})
+    response = requests.get(
+        url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
+    )
     data = response.json()
     items = data.get("Items", [])
+
     if not items:
         return False, None, 0
+
     top_result = items[0].get("Text", "")
     score, _ = semantic_match(address, top_result)
     return True, top_result, int(round(score * 100))
@@ -198,10 +216,14 @@ def verify_with_canada_post(address):
 def kyc_multi_verify(files, expected_address, model_choice="OpenAI", strictness=0.82):
     if not files or len(files) < 2:
         return "❌ Verification Failed: Please upload at least two documents.", {}, {}
+
     try:
-        extracted_addresses, kyc_data = [], {}
-        similarity_scores, canada_post_verifications = [], []
-        suggested_addresses, authenticity_scores = [], []
+        extracted_addresses = []
+        kyc_data = {}
+        similarity_scores = []
+        canada_post_verifications = []
+        suggested_addresses = []
+        authenticity_scores = []
 
         for idx, file in enumerate(files[:3]):
             text = extract_text_from_file(file.name)
@@ -319,5 +341,9 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
         outputs=[status_html, output_json, document_info_json]
     )
 
+
+    
+
 if __name__ == "__main__":
     iface.launch(share=True)
+
