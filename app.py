@@ -9,8 +9,6 @@ from unstructured.partition.image import partition_image
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain.chat_models import ChatOpenAI
-from langchain_openai import ChatOpenAI as OpenAIChat
-from deepface import DeepFace
 
 # --- Config ---
 similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
@@ -35,12 +33,12 @@ def get_llm(model_choice):
         "Mistral": "mistralai/Mistral-7B-Instruct-v0.2",
         "OpenAI": "openai/gpt-4o"
     }
-    return OpenAIChat(
+    return ChatOpenAI(
         temperature=0.2,
-        model=model_map[model_choice],
-        api_key=OPENROUTER_API_KEY,
-        base_url="https://openrouter.ai/api/v1",  # ✅ correct argument name in `langchain_openai`
-        max_tokens=2000
+        model_name=model_map[model_choice],
+        base_url="https://openrouter.ai/api/v1",
+        openai_api_key=OPENROUTER_API_KEY,
+        max_tokens=2000,
     )
 
 def clean_address_mistral(raw_response, original_text=""):
@@ -221,26 +219,14 @@ def verify_with_canada_post(address):
         return True, verified_address
     return False, address
 
-def extract_face_from_image(image_path):
-    try:
-        result = DeepFace.verify(img1_path=image_path, img2_path=image_path, model_name="Facenet", enforce_detection=False)
-        if result["verified"]:
-            return result["facial_areas"]["img1"]["x"], result["facial_areas"]["img1"]["y"], result["facial_areas"]["img1"]["w"], result["facial_areas"]["img1"]["h"]
-        return None
-    except Exception:
-        return None
-
-def kyc_multi_verify(files, selfie_image, expected_address, model_choice, consistency_threshold):
+def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
     if not files or len(files) < 2:
         return "❌ Please upload at least two documents.", {}, {}
-    if not selfie_image:
-        return "❌ Please upload a selfie image.", {}, {}
     try:
         results = {}
         kyc_fields = {}
         addresses = []
         authenticity_scores = []
-        id_face_coords = None
         for idx, file in enumerate(files):
             text = extract_text_from_file(file.name)
             address = extract_address_with_llm(text, model_choice)
@@ -256,41 +242,18 @@ def kyc_multi_verify(files, selfie_image, expected_address, model_choice, consis
             results[f"canada_post_verified_{idx+1}"] = verified
             results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
             kyc_fields[f"document_{idx+1}"] = filter_non_null_fields(fields)
-            # Extract face from ID image (assuming first document has the ID photo)
-            if idx == 0 and file.name.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
-                coords = extract_face_from_image(file.name)
-                if coords:
-                    id_face_coords = coords
 
         consistency_score, consistent = semantic_match(addresses[0], addresses[1], threshold=consistency_threshold)
         avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
         results["document_consistency_score"] = round(consistency_score, 3)
         results["documents_consistent"] = consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
-
-        # Selfie face verification (independent metric)
-        selfie_face_coords = extract_face_from_image(selfie_image)
-        face_match_score = 0.0
-        if id_face_coords and selfie_face_coords:
-            try:
-                result = DeepFace.verify(img1_path=files[0].name, img2_path=selfie_image, model_name="Facenet", enforce_detection=False)
-                face_match_score = result["distance"]  # Lower distance indicates better match
-                results["face_match_score"] = round(1 - face_match_score, 3)  # Convert to similarity score (1 - distance)
-                results["face_match_verified"] = result["verified"]
-            except Exception:
-                results["face_match_score"] = 0.0
-                results["face_match_verified"] = False
-        else:
-            results["face_match_score"] = 0.0
-            results["face_match_verified"] = False
-
-        # Final result based only on address and Canada Post verification
         results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and (consistency_score >= consistency_threshold)
 
         status = (
-            f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b><br>Face Match Score: <b>{int(round(results.get('face_match_score', 0) * 100))}%</b>"
+            f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
             if results["final_result"]
-            else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b><br>Face Match Score: <b>{int(round(results.get('face_match_score', 0) * 100))}%</b>"
+            else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
         return status, results, kyc_fields
     except Exception as e:
@@ -373,22 +336,20 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             gr.Markdown("<span class='purple-circle'>1</span> **Upload Documents (2 or more)**")
             file_inputs = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], file_count="multiple", label="Documents")
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>2</span> **Upload Selfie**")
-            selfie_input = gr.Image(type="filepath", label="Selfie Image")
-            gr.Markdown("<span class='purple-circle'>3</span> **Enter Expected Address**")
+            gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
             expected_address = gr.Textbox(label="Expected Address", placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2")
-            gr.Markdown("<span class='purple-circle'>4</span> **Select LLM Provider**")
+            gr.Markdown("<span class='purple-circle'>3</span> **Select LLM Provider**")
             model_choice = gr.Dropdown(choices=["Mistral", "OpenAI"], value="Mistral", label="LLM Provider")
-            gr.Markdown("<span class='purple-circle'>5</span> **Set Consistency Threshold**")
+            gr.Markdown("<span class='purple-circle'>4</span> **Set Consistency Threshold**")
             consistency_threshold = gr.Slider(minimum=0.5, maximum=1.0, value=0.82, step=0.01, label="Consistency Threshold")
             verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Status**")
+            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Status**")
             status_html = gr.HTML()
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>7</span> **KYC Verification Details**")
+            gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
                 output_json = gr.JSON(label="KYC Output")
@@ -396,7 +357,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
                 document_info_json = gr.JSON(label="Document Fields")
     verify_btn.click(
         fn=kyc_multi_verify,
-        inputs=[file_inputs, selfie_input, expected_address, model_choice, consistency_threshold],
+        inputs=[file_inputs, expected_address, model_choice, consistency_threshold],
         outputs=[status_html, output_json, document_info_json]
     )
 
