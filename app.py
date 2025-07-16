@@ -221,7 +221,7 @@ def verify_with_canada_post(address):
 
 def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
     if not files or len(files) < 2:
-        return "❌ Please upload at least two documents.", [], [[] for _ in range(2)]
+        return "❌ Please upload at least two documents.", [["No data", ""]], [[] for _ in range(2)]
     try:
         results = {}
         kyc_fields = {}
@@ -274,9 +274,9 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             ]
             doc_details_data.append(doc_data)
 
-        # Pad with empty lists if fewer than 2 documents
+        # Pad with empty 2D lists if fewer than 2 documents
         while len(doc_details_data) < 2:
-            doc_details_data.append([])
+            doc_details_data.append([["No data", ""]])
 
         status = (
             f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
@@ -285,7 +285,7 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         )
         return status, kyc_output_data, doc_details_data
     except Exception as e:
-        return f"❌ Error: {str(e)}", [], [[] for _ in range(2)]
+        return f"❌ Error: {str(e)}", [["Error", str(e)]], [[] for _ in range(2)]
 
 # --- UI ---
 custom_css = """
