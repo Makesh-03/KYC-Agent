@@ -228,13 +228,15 @@ def kyc_multi_verify(files, expected_address, model_choice):
         consistency_score, consistent = semantic_match(addresses[0], addresses[1])
         results["document_consistency_score"] = round(consistency_score, 3)
         results["documents_consistent"] = consistent
-        results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and consistent
         results["average_authenticity_score"] = round(sum(authenticity_scores) / len(authenticity_scores), 2)
 
+        # ✅ New passing logic: 90+ authenticity & consistency
+        results["final_result"] = results["average_authenticity_score"] >= 90 and consistent
+
         status = (
-            f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b>"
+            f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Authenticity Score: <b>{results['average_authenticity_score']}%</b>"
             if results["final_result"]
-            else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b>"
+            else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Authenticity Score: <b>{results['average_authenticity_score']}%</b>"
         )
         return status, results, kyc_fields
     except Exception as e:
