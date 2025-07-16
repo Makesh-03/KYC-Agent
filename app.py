@@ -47,15 +47,15 @@ def clean_address_mistral(raw_response, original_text=""):
     flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d+)?[\.\):])\s*)+", "", flattened)
     flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d+)?[\.\):]?\s*", "", flattened)
     flattened = re.sub(r"^\d+\.\d+\s+", "", flattened)
-    # Match only standalone numbers (no dots) followed by street info
+    # Match standalone numbers or numbers with apartment/unit notation
     match = re.search(
-        r"^\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
+        r"^(?:\d{1,5}[A-Za-z\-]?|(?:Apt|Unit|Suite)\s*\d{1,5})\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
         re.IGNORECASE,
     )
     if match:
         return match.group(0).strip()
-    # Fallback to original text with stricter pattern
+    # Fallback with stricter pattern for standalone numbers
     fallback = re.search(
         r"^\d{1,5}(?![.\d])\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         original_text.replace("\n", " "),
@@ -70,7 +70,7 @@ def extract_address_with_llm(text, model_choice):
         template = (
             "You are a strict document parser extracting Canadian addresses.\n\n"
             "Your task is to extract ONLY the full Canadian mailing address from the document text. The address must include:\n"
-            "- A house or building number (must be a standalone number like '2', '742', '38A', NOT a prefixed section number like '8.', '8.2', '8)', '9)') \n"
+            "- A house or building number (must be a standalone number like '2', '742', '38A', or apartment/unit notation like 'Apt 2', 'Unit 2', NOT a prefixed section number like '8.', '8.2', '8)', '9)') \n"
             "- Street name\n"
             "- City or town\n"
             "- Province (use two-letter code like ON, NL)\n"
@@ -78,17 +78,18 @@ def extract_address_with_llm(text, model_choice):
             "**IMPORTANT RULES:**\n"
             "- DO NOT include section numbers (e.g., '8.', '9.', '8.2', '8)', '9)') or labels like 'Eyes:', 'Class:', etc.\n"
             "- Ignore any lines starting with numbers followed by a dot or parenthesis (e.g., '8.', '8.2', '9)') as these are section headers, not addresses.\n"
-            "- The address should begin with the actual building number (e.g., '2 Thorburn Road'), ensuring no dot-separated numbers (e.g., '8.2') are used as the building number.\n"
+            "- The address should begin with the actual building number or apartment/unit number (e.g., '2 Thorburn Road' or 'Apt 2 Thorburn Road'), ensuring no dot-separated numbers (e.g., '8.2') are used as the building number.\n"
+            "- Prioritize extracting door numbers or unit numbers if present (e.g., 'Apt 2', 'Unit 3').\n"
             "- Never assume or hallucinate building numbers like '8.2' if the actual number is just '2'.\n"
             "- If multiple addresses exist, pick the one that is clearly a Canadian residential or mailing address.\n\n"
             "Return ONLY the address in one line. No extra words, explanations, or labels.\n\n"
-            "Example Output:\n742 Evergreen Terrace, Ottawa, ON K1A 0B1\n\n"
+            "Example Output:\nApt 2, 742 Evergreen Terrace, Ottawa, ON K1A 0B1\n\n"
             "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
         template = (
             "Extract the full Canadian mailing address from the following text. "
-            "Include street, city, province, and postal code. Ensure the building number is a standalone number (e.g., '2', not '8.2').\n\n"
+            "Include street, city, province, and postal code. Ensure the building number is a standalone number (e.g., '2', 'Apt 2', not '8.2').\n\n"
             "Text: {document_text}\n\nAddress:"
         )
     prompt = PromptTemplate(template=template, input_variables=["document_text"])
@@ -222,7 +223,7 @@ def verify_with_canada_post(address):
         return True, verified_address
     return False, address
 
-def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
+def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold, similarity_threshold):
     if not files or len(files) < 2:
         return "❌ Please upload at least two documents.", {}, {}
     try:
@@ -246,12 +247,12 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
             kyc_fields[f"document_{idx+1}"] = filter_non_null_fields(fields)
 
-        consistency_score, consistent = semantic_match(addresses[0], addresses[1], threshold=consistency_threshold)
+        consistency_score, consistent = semantic_match(addresses[0], addresses[1], threshold=similarity_threshold)
         avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
         results["document_consistency_score"] = round(consistency_score, 3)
         results["documents_consistent"] = consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
-        results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and (consistency_score >= consistency_threshold)
+        results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and (consistency_score >= similarity_threshold)
 
         status = (
             f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
@@ -345,14 +346,16 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             model_choice = gr.Dropdown(choices=["Mistral", "OpenAI"], value="Mistral", label="LLM Provider")
             gr.Markdown("<span class='purple-circle'>4</span> **Set Consistency Threshold**")
             consistency_threshold = gr.Slider(minimum=0.5, maximum=1.0, value=0.82, step=0.01, label="Consistency Threshold")
+            gr.Markdown("<span class='purple-circle'>5</span> **Set Similarity Threshold**")
+            similarity_threshold = gr.Slider(minimum=0.5, maximum=1.0, value=0.82, step=0.01, label="Similarity Threshold")
             verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Status**")
+            gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Status**")
             status_html = gr.HTML()
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
+            gr.Markdown("<span class='purple-circle'>7</span> **KYC Verification Details**")
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
                 output_json = gr.JSON(label="KYC Output")
@@ -360,7 +363,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
                 document_info_json = gr.JSON(label="Document Fields")
     verify_btn.click(
         fn=kyc_multi_verify,
-        inputs=[file_inputs, expected_address, model_choice, consistency_threshold],
+        inputs=[file_inputs, expected_address, model_choice, consistency_threshold, similarity_threshold],
         outputs=[status_html, output_json, document_info_json]
     )
 
