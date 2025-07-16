@@ -63,17 +63,20 @@ def clean_address_mistral(raw_response, original_text=""):
 def extract_address_with_llm(text, model_choice):
     if model_choice == "Mistral":
         template = (
-            "You are an expert information extractor. Extract ONLY the full Canadian mailing address from the provided document text. "
-            "The address must include all of the following:\n"
-            "- House or building number (e.g., 2, 742, 8.2)\n"
+            "You are a strict document parser extracting Canadian addresses.\n\n"
+            "Your task is to extract ONLY the full Canadian mailing address from the document text. The address must include:\n"
+            "- A house or building number (must be a standalone number like '2', '742', '38A', NOT a prefixed section number like '8.' or '8)')\n"
             "- Street name\n"
-            "- City\n"
-            "- Province (2-letter code, e.g., ON, NL)\n"
+            "- City or town\n"
+            "- Province (use two-letter code like ON, NL)\n"
             "- Postal code (format: A1A 1A1)\n\n"
-            "Do NOT skip or omit the house/building number. "
-            "Ignore section labels like '8.', '9.', 'Eyes:', 'Class:', etc. "
-            "Return only the full address in a single line, with no explanation or labels. "
-            "Example: 742 Evergreen Terrace, Ottawa, ON K1A 0B1\n\n"
+            "**IMPORTANT RULES:**\n"
+            "- DO NOT include section numbers (e.g., '8.', '9.', '8)', '9)') or labels like 'Eyes:', 'Class:', etc.\n"
+            "- The address should begin with the actual building number (e.g., '2 Thorburn Road')\n"
+            "- Never assume or hallucinate building numbers like '8.2' if the actual number is just '2'.\n"
+            "- If multiple addresses exist, pick the one that is clearly a Canadian residential or mailing address.\n\n"
+            "Return ONLY the address in one line. No extra words, explanations, or labels.\n\n"
+            "Example Output:\n742 Evergreen Terrace, Ottawa, ON K1A 0B1\n\n"
             "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
@@ -188,7 +191,6 @@ Text:
                 "error": "Failed to parse KYC fields",
                 "raw_output": raw_output
             }
-# ...existing code...
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
