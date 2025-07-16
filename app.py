@@ -75,7 +75,7 @@ def extract_address_with_llm(text, model_choice):
             "Make sure to include house/building number, street name, city, province, and postal code. "
             "Only extract a complete and accurate Canadian address. Do not omit the house number or add extra content. "
             "Do NOT return explanations, only the address as a single line. "
-            "Example format: 2 Thorburn Road, St. John's, NL A1B 3L7\n\n"
+            "Example format: 78 Bloor Street West, Toronto, ON M5S 1L5\n\n"
             "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
@@ -137,7 +137,7 @@ Text:
 
     if "address" in kyc_output:
         addr = kyc_output["address"]
-        if len(addr) < 10 or re.search(r"(Eyes|Sex|Height|Classe)", addr, re.IGNORECASE):
+        if len(addr) < 10 or re.search(r"(Eyes|Sex|Height|Classe|\d+\.)", addr, re.IGNORECASE):
             kyc_output["address"] = extracted_address_1
 
     return kyc_output
@@ -198,6 +198,7 @@ def kyc_dual_verify(file1, file2, expected_address, model_choice):
         return status, verification_result, kyc_combined
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
+
 
 # --- UI ---
 custom_css = """
