@@ -37,8 +37,8 @@ def get_llm(model_choice):
     return ChatOpenAI(
         temperature=0.2,
         model_name=model_map[model_choice],
-        base_url="https://openrouter.ai/api/v1",
         openai_api_key=OPENROUTER_API_KEY,
+        openai_api_base="https://openrouter.ai/api/v1",  # ✅ Correct argument
         max_tokens=2000,
     )
 
