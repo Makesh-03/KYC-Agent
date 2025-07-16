@@ -9,6 +9,7 @@ from unstructured.partition.image import partition_image
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI as OpenAIChat
 from deepface import DeepFace
 
 # --- Config ---
@@ -34,12 +35,12 @@ def get_llm(model_choice):
         "Mistral": "mistralai/Mistral-7B-Instruct-v0.2",
         "OpenAI": "openai/gpt-4o"
     }
-    return ChatOpenAI(
+    return OpenAIChat(
         temperature=0.2,
-        model_name=model_map[model_choice],
-        openai_api_key=OPENROUTER_API_KEY,
-        openai_api_base="https://openrouter.ai/api/v1",  # ✅ Use this instead of `base_url`
-        max_tokens=2000,
+        model=model_map[model_choice],
+        api_key=OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",  # ✅ correct argument name in `langchain_openai`
+        max_tokens=2000
     )
 
 def clean_address_mistral(raw_response, original_text=""):

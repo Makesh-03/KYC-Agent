@@ -9,10 +9,10 @@ pi-heif
 unstructured-inference
 pdf2image
 pytesseract
-langchain
+langchain==0.1.16
 langchain-huggingface
 langchain-community
-openai
+openai==1.21.0
 PyMuPDF
 deepface
 tf-keras
@@ -22,5 +22,7 @@ tf-keras
 transformers==4.40.1
 pdfminer.six==20221105
 nltk==3.8.1
+langchain-openai
+
 # Note: The error is not related to missing packages.
 # It is due to an invalid model ID in your code or API call.
