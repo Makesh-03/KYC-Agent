@@ -1,6 +1,4 @@
-# Full updated KYC Agent with Canada Post Authenticity Score
-
-# Full updated KYC Agent with Canada Post Authenticity Score (House Number Fix)
+# Full updated KYC Agent with Canada Post Authenticity Score (House Number Fix + Similarity Strictness Slider)
 
 import os
 import re
@@ -46,7 +44,6 @@ def get_llm(model_choice="OpenAI"):
 
 def clean_extracted_address(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
-    # FIXED: avoid stripping valid house numbers
     flattened = re.sub(r"^\s*[\•\-–—]?\s*", "", flattened)
 
     match = re.search(
@@ -194,7 +191,7 @@ def verify_with_canada_post(address):
     score, _ = semantic_match(address, top_result)
     return True, top_result, int(round(score * 100))
 
-def kyc_multi_verify(files, expected_address, model_choice="OpenAI"):
+def kyc_multi_verify(files, expected_address, model_choice="OpenAI", strictness=0.82):
     if not files or len(files) < 2:
         return "❌ Verification Failed: Please upload at least two documents.", {}, {}
 
@@ -209,7 +206,7 @@ def kyc_multi_verify(files, expected_address, model_choice="OpenAI"):
         for idx, file in enumerate(files[:3]):
             text = extract_text_from_file(file.name)
             address = extract_address_with_llm(text, model_choice)
-            sim_score, match = semantic_match(address, expected_address)
+            sim_score, match = semantic_match(address, expected_address, threshold=strictness)
             verified, suggested_address, authenticity_score = verify_with_canada_post(address)
             kyc_fields = filter_non_null_fields(extract_kyc_fields(text, model_choice))
 
@@ -220,7 +217,7 @@ def kyc_multi_verify(files, expected_address, model_choice="OpenAI"):
             authenticity_scores.append(authenticity_score)
             kyc_data[f"document_{idx+1}"] = kyc_fields
 
-        consistency_score, consistent = semantic_match(extracted_addresses[0], extracted_addresses[1])
+        consistency_score, consistent = semantic_match(extracted_addresses[0], extracted_addresses[1], threshold=strictness)
         percent_score = int(round(consistency_score * 100))
         passed = all(m for _, m in similarity_scores) and all(canada_post_verifications) and consistent
 
@@ -233,7 +230,8 @@ def kyc_multi_verify(files, expected_address, model_choice="OpenAI"):
             "canada_post_verified": canada_post_verifications,
             "document_consistency_score": round(consistency_score, 3),
             "documents_consistent": consistent,
-            "final_result": passed
+            "final_result": passed,
+            "strictness_threshold_used": round(strictness, 2)
         }
 
         status = f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{percent_score}%</b>" if passed else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{percent_score}%</b>"
@@ -243,9 +241,7 @@ def kyc_multi_verify(files, expected_address, model_choice="OpenAI"):
     except Exception as e:
         return f"❌ <b style='color:red;'>Error:</b> {str(e)}", {}, {}
 
-# UI definition remains unchanged — connect this logic to your existing Gradio layout
-
-# --- UI ---
+# --- UI Layout ---
 custom_css = """
 .purple-small {
     background-color: #a020f0 !important;
@@ -256,7 +252,6 @@ custom_css = """
     border-radius: 5px !important;
     border: none !important;
 }
-
 h1 {
     font-size: 42px !important;
     font-weight: 900 !important;
@@ -288,20 +283,19 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>1</span> **Upload 2 or 3 Documents (e.g., License, Cheque)**")
-            multi_file_input = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], label="KYC Documents", file_count="multiple")
+            gr.Markdown("<span class='purple-circle'>1</span> **Upload 2 or 3 Documents**")
+            multi_file_input = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], file_count="multiple", label="KYC Documents")
         with gr.Column():
             gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
-            expected_address = gr.Textbox(
-                label="Expected Address",
-                placeholder="e.g., 145 BAY STREET TORONTO, ON M5J 2R7"
-            )
+            expected_address = gr.Textbox(label="Expected Address", placeholder="e.g., 145 BAY STREET TORONTO, ON M5J 2R7")
 
     with gr.Row():
         with gr.Column():
-            gr.Markdown("<span class='purple-circle'>3</span> **LLM Provider (OpenAI GPT-4o only)**")
-            model_choice = gr.Textbox(value="OpenAI", visible=False)
+            gr.Markdown("<span class='purple-circle'>3</span> **Similarity Strictness (Adjust Sensitivity)**")
+            strictness_slider = gr.Slider(minimum=0.6, maximum=0.95, step=0.01, value=0.82, label="Similarity Strictness Threshold")
 
+        with gr.Column():
+            model_choice = gr.Textbox(value="OpenAI", visible=False)
             verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
 
     with gr.Row():
@@ -314,14 +308,14 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Details**")
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
-                output_json = gr.JSON(label="KYC Output")
+                output_json = gr.JSON(label="Verification Result")
                 with gr.Group():
-                    gr.Markdown("### Extracted Document Details")
-                    document_info_json = gr.JSON(label="Document Fields")
+                    gr.Markdown("### Extracted Document Data")
+                    document_info_json = gr.JSON(label="KYC Fields")
 
     verify_btn.click(
         fn=kyc_multi_verify,
-        inputs=[multi_file_input, expected_address, model_choice],
+        inputs=[multi_file_input, expected_address, model_choice, strictness_slider],
         outputs=[status_html, output_json, document_info_json]
     )
 
