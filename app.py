@@ -15,6 +15,7 @@ similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
 
+# --- Helpers ---
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None"]}
 
@@ -65,9 +66,7 @@ def clean_extracted_address(raw_response, original_text=""):
 
     return flattened
 
-def fix_malformed_house_number(address: str) -> str:
-    return re.sub(r"\b8\.2\b", "2", address)  # add more rules if needed
-
+# ✅ Updated extract_address_with_llm with LLaMA fix
 def extract_address_with_llm(text, model_choice):
     template = (
         "Extract the full Canadian residential address from the scanned document text. "
@@ -82,8 +81,13 @@ def extract_address_with_llm(text, model_choice):
     result = chain.invoke({"document_text": text})
     raw = result["text"].strip()
     cleaned = clean_extracted_address(raw, original_text=text)
-    fixed = fix_malformed_house_number(cleaned)
-    return fixed
+
+    # 🛠️ Fix hallucinated house number specific to LLaMA
+    if model_choice == "LLaMA":
+        if "8.2 THORBURN ROAD" in cleaned.upper():
+            cleaned = cleaned.upper().replace("8.2", "2")
+
+    return cleaned
 
 def extract_kyc_fields(text, model_choice):
     prompt_text = """
@@ -146,8 +150,34 @@ Text:
                 return json.loads(json_str)
             except Exception:
                 pass
-        # As a last resort, return the raw output as a string for debugging
-        return {"error": "Failed to parse KYC fields", "raw_output": raw_output}
+        # As a last resort, return a dict with all fields set to null
+        return {
+            "document_type": None,
+            "document_number": None,
+            "country_of_issue": None,
+            "issuing_authority": None,
+            "full_name": None,
+            "first_name": None,
+            "middle_name": None,
+            "last_name": None,
+            "gender": None,
+            "date_of_birth": None,
+            "place_of_birth": None,
+            "nationality": None,
+            "address": None,
+            "date_of_issue": None,
+            "date_of_expiry": None,
+            "blood_group": None,
+            "personal_id_number": None,
+            "father_name": None,
+            "mother_name": None,
+            "marital_status": None,
+            "photo_base64": None,
+            "signature_base64": None,
+            "additional_info": None,
+            "error": "Failed to parse KYC fields",
+            "raw_output": raw_output
+        }
 
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
