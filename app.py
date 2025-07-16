@@ -73,7 +73,7 @@ def extract_address_with_llm(text, model_choice):
             "- Province (use two-letter code like ON, NL)\n"
             "- Postal code (format: A1A 1A1)\n\n"
             "**IMPORTANT RULES:**\n"
-            "- DO NOT include section numbers (e.g., '8.', '9.', '8)', '9)') or labels like 'Eyes:', 'Class:', etc.\n"
+            "- DO NOT include section numbers (e.g., '8.', '9., '8)', '9)') or labels like 'Eyes:', 'Class:', etc.\n"
             "- Ignore any lines starting with numbers followed by a dot or parenthesis (e.g., '8.', '8.2', '9)') as these are section headers, not addresses."
             "- The address should begin with the actual building number (e.g., '2 Thorburn Road')\n"
             "- Never assume or hallucinate building numbers like '8.2' if the actual number is just '2'.\n"
@@ -91,7 +91,6 @@ def extract_address_with_llm(text, model_choice):
     prompt = PromptTemplate(template=template, input_variables=["document_text"])
     chain = LLMChain(llm=get_llm(model_choice), prompt=prompt)
     result = chain.invoke({"document_text": text})
-    # Apply the same cleaning logic to OpenAI output as Mistral
     return clean_address_mistral(result["text"].strip(), original_text=text)
 
 def extract_kyc_fields(text, model_choice):
@@ -136,11 +135,15 @@ Text:
     result = LLMChain(llm=get_llm(model_choice), prompt=prompt).invoke({"text": text})
     raw_output = result["text"].strip()
     try:
-        return json.loads(raw_output)
+        fields = json.loads(raw_output)
+        # Clean the address field if it exists
+        if "address" in fields and fields["address"] != "Not provided":
+            fields["address"] = clean_address_mistral(fields["address"], original_text=text)
+        return fields
     except Exception:
         json_match = re.search(r"\{[\s\S]+\}", raw_output)
         try:
-            return json.loads(json_match.group()) if json_match else {
+            fields = json.loads(json_match.group()) if json_match else {
                 "document_type": "Not provided",
                 "document_number": "Not provided",
                 "country_of_issue": "Not provided",
@@ -167,6 +170,10 @@ Text:
                 "error": "No JSON block found",
                 "raw_output": raw_output
             }
+            # Clean the address field if it exists
+            if "address" in fields and fields["address"] != "Not provided":
+                fields["address"] = clean_address_mistral(fields["address"], original_text=text)
+            return fields
         except Exception:
             return {
                 "document_type": "Not provided",
