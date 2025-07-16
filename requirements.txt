@@ -21,6 +21,6 @@ tensorflow<2.14
 tf-keras
 transformers==4.40.1
 pdfminer.six==20221105
-
+nltk==3.8.1
 # Note: The error is not related to missing packages.
 # It is due to an invalid model ID in your code or API call.
