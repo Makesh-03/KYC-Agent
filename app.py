@@ -101,7 +101,7 @@ def extract_address_with_llm(text, model_choice):
             "- DO NOT include section numbers (e.g., '8.', '8.2', '9.', '8)', '8a)') or labels like 'Section 8', 'Item 8', 'Eyes:', 'Class:'.\n"
             "- The address must begin with the actual building number (e.g., '2 Thorburn Road', NOT '8.2 Thorburn Road').\n"
             "- Ignore any numbers that appear to be part of document sections or labels.\n"
-            "- If multiple addresses exist, pick the one that is clearly a Canadian枢 for Canadian residential or mailing address.\n"
+            "- If multiple addresses exist, pick the one that is clearly a Canadian residential or mailing address.\n"
             "- Return ONLY the address in one line. No extra words, explanations, or labels.\n\n"
             "Example Input:\n"
             "8.2 Thorburn Road, St. John's, NL A1B 3M2\n"
@@ -220,7 +220,7 @@ Text:
                 "photo_base64": "Not provided",
                 "signature_base64": "Not provided",
                 "additional_info": "Not provided",
-                "error": "Failed to parses KYC fields",
+                "error": "Failed to parse KYC fields",
                 "raw_output": raw_output
             }
 
@@ -309,7 +309,7 @@ h1 {
 }
 .purple-button button {
     background-color: #a020f0 !important;
-    color:  white !important;
+    color: white !important;
     font-weight: bold !important;
     font-size: 16px !important;
     padding: 10px 22px !important;
