@@ -219,6 +219,7 @@ def verify_with_canada_post(address):
         return True, verified_address
     return False, address
 
+# --- Format verification results as HTML table (added as per your reference) ---
 def format_verification_table(results):
     if not results:
         return ""
@@ -237,13 +238,12 @@ def format_verification_table(results):
           <td style="font-size:17px;font-weight:700;color:#008000;">Average Authenticity Score:</td>
           <td style="font-size:17px;color:#008000;">{}%</td>
         </tr>
-""".format(
+    """.format(
         "#008000" if results.get("final_result", False) else "#FF0000",
         "Passed" if results.get("final_result", False) else "Failed",
         int(round(results.get("document_consistency_score", 0) * 100)),
         int(round(results.get("average_authenticity_score", 0) * 100))
     )
-    
     for idx in range(len([k for k in results.keys() if k.startswith("extracted_address_")])):
         table_html += """
         <tr>
@@ -276,7 +276,6 @@ def format_verification_table(results):
             "Yes" if results.get(f"canada_post_verified_{idx+1}", False) else "No",
             int(round(results.get(f"authenticity_score_{idx+1}", 0) * 100))
         )
-    
     table_html += """
       </table>
     </div>
@@ -285,7 +284,7 @@ def format_verification_table(results):
 
 def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
     if not files or len(files) < 2:
-        return "❌ Please upload at least two documents.", "", {}
+        return "❌ Please upload at least two documents.", {}, {}
     try:
         results = {}
         kyc_fields = {}
@@ -312,6 +311,7 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         results["document_consistency_score"] = round(consistency_score, 3)
         results["documents_consistent"] = consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
+        # Final result now strictly requires consistency score to meet or exceed the threshold
         results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and (consistency_score >= consistency_threshold)
 
         status = (
@@ -319,8 +319,8 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             if results["final_result"]
             else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
-        table_html = format_verification_table(results)
-        return status, table_html, kyc_fields
+        # --- Return the new HTML table for the KYC Output section ---
+        return status, format_verification_table(results), kyc_fields
     except Exception as e:
         return f"❌ Error: {str(e)}", "", {}
 
@@ -417,7 +417,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
-                output_html = gr.HTML(label="KYC Output")
+                output_html = gr.HTML(label="KYC Output")  # changed from gr.JSON to gr.HTML for table rendering
                 gr.Markdown("### Extracted Document Details")
                 document_info_json = gr.JSON(label="Document Fields")
     verify_btn.click(
