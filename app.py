@@ -1,3 +1,4 @@
+
 import os
 import re
 import json
@@ -248,7 +249,6 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         results["document_consistency_score"] = round(consistency_score, 3)
         results["documents_consistent"] = consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
-        # Final result now strictly requires consistency score to meet or exceed the threshold
         results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and (consistency_score >= consistency_threshold)
 
         status = (
@@ -330,6 +330,70 @@ h1 {
 }
 """
 
+def format_verification_table(results):
+    if not results:
+        return ""
+    table_html = """
+    <div style="border-radius:16px;border:2px solid #A020F0;margin-bottom:32px;background:#D3D3D3;padding:18px 22px 22px 22px;box-shadow:0 3px 16px #0001;">
+      <table style="width:100%;border:none;margin-bottom:12px;">
+        <tr>
+          <td style="width:40%;font-size:17px;font-weight:700;color:#008000;">Final Result:</td>
+          <td style="width:60%;font-size:17px;font-weight:700;color:{};">{}</td>
+        </tr>
+        <tr>
+          <td style="font-size:17px;font-weight:700;color:#008000;">Consistency Score:</td>
+          <td style="font-size:17px;color:#008000;">{}%</td>
+        </tr>
+        <tr>
+          <td style="font-size:17px;font-weight:700;color:#008000;">Average Authenticity Score:</td>
+          <td style="font-size:17px;color:#008000;">{}%</td>
+        </tr>
+""".format(
+        "#008000" if results.get("final_result", False) else "#FF0000",
+        "Passed" if results.get("final_result", False) else "Failed",
+        int(round(results.get("document_consistency_score", 0) * 100)),
+        int(round(results.get("average_authenticity_score", 0) * 100))
+    )
+    
+    for idx in range(len([k for k in results.keys() if k.startswith("extracted_address_")])):
+        table_html += """
+        <tr>
+          <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Document {} Address:</td>
+          <td style="font-weight:600;font-size:15px;color:#008000;">{}</td>
+        </tr>
+        <tr>
+          <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Similarity to Expected:</td>
+          <td style="font-weight:600;font-size:15px;color:#008000;">{}%</td>
+        </tr>
+        <tr>
+          <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Address Match:</td>
+          <td style="font-weight:600;font-size:15px;color:{};">{}</td>
+        </tr>
+        <tr>
+          <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Canada Post Verified:</td>
+          <td style="font-weight:600;font-size:15px;color:{};">{}</td>
+        </tr>
+        <tr>
+          <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Authenticity Score:</td>
+          <td style="font-weight:600;font-size:15px;color:#008000;">{}%</td>
+        </tr>
+        """.format(
+            idx + 1,
+            results.get(f"extracted_address_{idx+1}", "Not provided"),
+            int(round(results.get(f"similarity_to_expected_{idx+1}", 0) * 100)),
+            "#008000" if results.get(f"address_match_{idx+1}", False) else "#FF0000",
+            "Yes" if results.get(f"address_match_{idx+1}", False) else "No",
+            "#008000" if results.get(f"canada_post_verified_{idx+1}", False) else "#FF0000",
+            "Yes" if results.get(f"canada_post_verified_{idx+1}", False) else "No",
+            int(round(results.get(f"authenticity_score_{idx+1}", 0) * 100))
+        )
+    
+    table_html += """
+      </table>
+    </div>
+    """
+    return table_html
+
 with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
     gr.Markdown("# EZOFIS KYC Agent")
     with gr.Row():
@@ -353,13 +417,19 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
-                output_json = gr.JSON(label="KYC Output")
+                output_html = gr.HTML(label="KYC Output")
                 gr.Markdown("### Extracted Document Details")
                 document_info_json = gr.JSON(label="Document Fields")
     verify_btn.click(
         fn=kyc_multi_verify,
         inputs=[file_inputs, expected_address, model_choice, consistency_threshold],
-        outputs=[status_html, output_json, document_info_json]
+        outputs=[status_html, output_html, document_info_json],
+        _js="""(files, address, model, threshold) => {
+            return window.gradioAPI.runPython('kyc_multi_verify', [files, address, model, threshold]).then(([status, results, kyc_fields]) => {
+                const table_html = window.gradioAPI.runPython('format_verification_table', [results]);
+                return [status, table_html, kyc_fields];
+            });
+        }"""
     )
 
 if __name__ == "__main__":
