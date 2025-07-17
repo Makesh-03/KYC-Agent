@@ -59,8 +59,8 @@ def clean_address_mistral(raw_response, original_text=""):
 def extract_address_with_llm(text, model_choice):
     if model_choice == "Mistral":
         template = (
-            "You are an expert document parser. Extract the full Canadian mailing address from the document text, including building/house number, street name, city, province (two-letter code like ON, NL), and postal code (format: A1A 1A1). If a door, apartment, or unit number is present (e.g., 'Apt 2', 'Door 3'), include it. Return only the address in one line, no extra text.\n\n"
-            "Example Output:\nDoor 2, 123 Main St, St. John’s, NL A1A 1A1\n\n"
+            "You are an expert document parser. Extract the full Canadian mailing address from the document text, including the building/house number (e.g., '2', 'Apt 2', 'Door 3'), street name, city, province (two-letter code like ON, NL), and postal code (format: A1A 1A1). The building number must be included, even if it appears after the street name or in a non-standard format; ignore section headers (e.g., '8.', '8.2', '9)'). Return only the address in one line, no extra text or notes.\n\n"
+            "Example Output:\nDoor 2, 123 Main St, St. John’s, NL A1A 1A1\n2 Thorburn Road, St. John’s, NL A1B 3L7\n\n"
             "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
