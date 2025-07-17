@@ -44,6 +44,56 @@ def get_llm(model_choice):
 def clean_address_mistral(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
     flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d)?[\.\):])\s*)+", "", flattened)
+    flattened = re.sub(r"(?i Ascending
+System: I'll modify the CSS to apply a dark theme to the tables in the verification HTML while keeping all the logic unchanged. The changes will include a dark background for the tables and green text for letters and numbers, ensuring the table structure remains intact.
+
+<xaiArtifact artifact_id="ca0ed6cf-25ce-45af-847c-09def4d0bfe7" artifact_version_id="9b93b898-61a2-41c3-8371-b66281a3ac18" title="kyc_verification_ui.py" contentType="text/python">
+import os
+import re
+import json
+import requests
+import gradio as gr
+from sentence_transformers import SentenceTransformer, util
+from unstructured.partition.pdf import partition_pdf
+from unstructured.partition.image import partition_image
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+from langchain.chat_models import ChatOpenAI
+
+# --- Config ---
+similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
+
+def filter_non_null_fields(data):
+    return {k: v for k, v in data.items() if v not in [None, "null", "", "None", "Not provided"]}
+
+def extract_text_from_file(file_path):
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
+        elements = partition_pdf(file_path)
+    elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
+        elements = partition_image(filename=file_path)
+    else:
+        raise ValueError("Unsupported file type.")
+    return "\n".join([str(e) for e in elements])
+
+def get_llm(model_choice):
+    model_map = {
+        "Mistral": "mistralai/Mistral-7B-Instruct-v0.2",
+        "OpenAI": "openai/gpt-4o"
+    }
+    return ChatOpenAI(
+        temperature=0.2,
+        model_name=model_map[model_choice],
+        base_url="https://openrouter.ai/api/v1",
+        openai_api_key=OPENROUTER_API_KEY,
+        max_tokens=2000,
+    )
+
+def clean_address_mistral(raw_response, original_text=""):
+    flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
+    flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d)?[\.\):])\s*)+", "", flattened)
     flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d)?[\.\):]?\s*", "", flattened)
     flattened = re.sub(r"^\d+\.\d+\s+", "", flattened)
     match = re.search(
@@ -248,7 +298,6 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         results["document_consistency_score"] = round(consistency_score, 3)
         results["documents_consistent"] = consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
-        # Final result now strictly requires consistency score to meet or exceed the threshold
         results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and (consistency_score >= consistency_threshold)
 
         status = (
@@ -262,7 +311,7 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         for idx in range(len([k for k in results.keys() if k.startswith("extracted_address_")])):
             doc_num = idx + 1
             decision = results.get(f"address_match_{doc_num}") and results.get(f"canada_post_verified_{doc_num}")
-            decision_color = "#008000" if decision else "#FF0000"
+            decision_color = "#00FF00" if decision else "#FF0000"
             reason = "Address matches expected and verified by Canada Post" if decision else "Address mismatch or not verified by Canada Post"
             fields = kyc_fields.get(f"document_{doc_num}", {})
             document_type = fields.get("document_type", "Not provided")
@@ -272,14 +321,14 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             verified = results.get(f"canada_post_verified_{doc_num}", False)
             date_of_issue = fields.get("date_of_issue", "Not provided")
             date_of_expiry = fields.get("date_of_expiry", "Not provided")
-            bg_reason = "#ffe6e6" if not decision else "#e6ffe6"
+            bg_reason = "#2E1A47" if not decision else "#1A3C34"
             
             verification_html += f"""
-            <div style="border-radius:16px;border:2px solid #A020F0; margin-bottom:32px; background:#f9f7ff;padding:18px 22px 22px 22px;box-shadow:0 3px 16px #0001;">
-                <div style="font-size:14px;font-weight:600;letter-spacing:0.3px;margin-bottom:10px;color:#333;">
+            <div style="border-radius:16px;border:2px solid #A020F0; margin-bottom:32px; background:#1C2526;padding:18px 22px 22px 22px;box-shadow:0 3px 16px #0001;">
+                <div style="font-size:14px;font-weight:600;letter-spacing:0.3px;margin-bottom:10px;color:#00FF00;">
                     Document {doc_num}
                 </div>
-                <table style="width:100%;border:none;margin-bottom:12px;">
+                <table style="width:100%;border:none;margin-bottom:12px;background:#2E2E2E;color:#00FF00;">
                     <tr>
                         <td style="width:40%;font-size:17px;font-weight:700;">Decision:</td>
                         <td style="width:60%;font-size:17px;font-weight:700;color:{decision_color};">{'Accepted' if decision else 'Rejected'}</td>
@@ -289,28 +338,28 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
                         <td style="font-size:17px;">{int(similarity)}%</td>
                     </tr>
                 </table>
-                <div style="border-radius:8px;background:{bg_reason};padding:11px 14px 11px 14px;color:#720000;font-size:15.5px;margin-bottom:17px;">
+                <div style="border-radius:8px;background:{bg_reason};padding:11px 14px 11px 14px;color:#00FF00;font-size:15.5px;margin-bottom:17px;">
                     <span style="font-weight:bold;">Reason:</span><br>{reason}
                 </div>
-                <table style="width:100%;margin-top:10px;margin-bottom:5px;">
+                <table style="width:100%;margin-top:10px;margin-bottom:5px;background:#2E2E2E;color:#00FF00;">
                     <tr>
-                        <td style="font-weight:600;font-size:15px;border-bottom:1px solid #ddd;padding-bottom:3px;">Detected Document:</td>
-                        <td style="font-weight:600;font-size:15px;border-bottom:1px solid #ddd;padding-bottom:3px;">Extracted Address:</td>
+                        <td style="font-weight:600;font-size:15px;border-bottom:1px solid #4A4A4A;padding-bottom:3px;">Detected Document:</td>
+                        <td style="font-weight:600;font-size:15px;border-bottom:1px solid #4A4A4A;padding-bottom:3px;">Extracted Address:</td>
                     </tr>
                     <tr>
-                        <td style="color:{'#008000' if decision else '#222'};font-weight:600;font-size:15px;">{document_type}</td>
-                        <td style="color:{'#008000' if decision else '#222'};font-weight:600;font-size:15px;">{address}</td>
+                        <td style="color:{'#00FF00' if decision else '#00FF00'};font-weight:600;font-size:15px;">{document_type}</td>
+                        <td style="color:{'#00FF00' if decision else '#00FF00'};font-weight:600;font-size:15px;">{address}</td>
                     </tr>
                     <tr>
-                        <td style="font-weight:600;font-size:15px;border-bottom:1px solid #ddd;padding-bottom:3px;">Canada Post Verified:</td>
-                        <td style="font-weight:600;font-size:15px;border-bottom:1px solid #ddd;padding-bottom:3px;">Authenticity Score:</td>
+                        <td style="font-weight:600;font-size:15px;border-bottom:1px solid #4A4A4A;padding-bottom:3px;">Canada Post Verified:</td>
+                        <td style="font-weight:600;font-size:15px;border-bottom:1px solid #4A4A4A;padding-bottom:3px;">Authenticity Score:</td>
                     </tr>
                     <tr>
-                        <td style="color:{'#008000' if verified else '#FF0000'};font-weight:600;font-size:15px;">{'Yes' if verified else 'No'}</td>
-                        <td style="color:{'#008000' if authenticity >= 80 else '#FF0000'};font-weight:600;font-size:15px;">{int(authenticity)}%</td>
+                        <td style="color:{'#00FF00' if verified else '#FF0000'};font-weight:600;font-size:15px;">{'Yes' if verified else 'No'}</td>
+                        <td style="color:{'#00FF00' if authenticity >= 80 else '#FF0000'};font-weight:600;font-size:15px;">{int(authenticity)}%</td>
                     </tr>
                 </table>
-                <div style="color:#555;font-size:14px;margin-top:7px;">
+                <div style="color:#00FF00;font-size:14px;margin-top:7px;">
                     <b>Issue Date:</b> {date_of_issue}<br>
                     <b>Expiry Date:</b> {date_of_expiry}
                 </div>
