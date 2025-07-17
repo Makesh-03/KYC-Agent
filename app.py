@@ -59,8 +59,22 @@ def clean_address_mistral(raw_response, original_text=""):
 def extract_address_with_llm(text, model_choice):
     if model_choice == "Mistral":
         template = (
-            "You are an expert document parser. Extract the full Canadian mailing address from the document text, including the building/house number (e.g., '2', '4A', '4 A', 'Apt 2', 'Door 3'), street name, city, province (two-letter code like ON, NL), and postal code (format: A1A 1A1). The building number must be included, even if it appears after the street name or in a non-standard format (e.g., with a letter like '4A' or '4 A'); ignore section headers (e.g., '8.', '8.2', '9)'). Return only the address in one line, no extra text or notes.\n\n"
-            "Example Output:\nDoor 2, 123 Main St, St. John’s, NL A1A 1A1\n4A Thorburn Road, St. John’s, NL A1B 3L7\n4 A Thorburn Road, St. John’s, NL A1B 3L7\n2 Thorburn Road, St. John’s, NL A1B 3L7\n\n"
+            "You are a strict document parser extracting Canadian addresses.\n\n"
+            "Your task is to extract ONLY the full Canadian mailing address from the document text. The address must include:\n"
+            "- A house or building number (must be a standalone number like '2', '742', '4A', '38A', or door/apartment/unit notation like 'Apt 2', 'Unit 2', 'Door 3', NOT a prefixed section number like '8., '8.2', '8)', '9)') \n"
+            "- Street name\n"
+            "- City or town\n"
+            "- Province (use two-letter code like ON, NL)\n"
+            "- Postal code (format: A1A 1A1)\n\n"
+            "**IMPORTANT RULES:**\n"
+            "- DO NOT include section numbers (e.g., '8.', '9.', '8.2', '8)', '9)') or labels like 'Eyes:', 'Class:', etc.\n"
+            "- Ignore any lines starting with numbers followed by a dot or parenthesis (e.g., '8., '8.2', '9)') as these are section headers, not addresses.\n"
+            "- The building number can appear at the start or within the address (e.g., '4A Thorburn Road' or '2 Thorburn Road' or 'Apt 2 Thorburn Road' or 'Door 3 Thorburn Road'), ensuring no dot-separated numbers (e.g., '8.2') are used.\n"
+            "- Prioritize extracting door numbers, apartment numbers, or unit numbers if present (e.g., 'Apt 2', 'Unit 3', 'Door 4').\n"
+            "- Never assume or hallucinate building numbers like '8.2' if the actual number is just '2'.\n"
+            "- If multiple addresses exist, pick the one that is clearly a Canadian residential or mailing address, ensuring all components (number, street, city, province, postal code) are included.\n\n"
+            "Return ONLY the address in one line. No extra words, explanations, or labels.\n\n"
+            "Example Output:\nApt 2, 742 Evergreen Terrace, Ottawa, ON K1A 0B1\nDoor 3, 123 Main St, St. John’s, NL A1A 1A1\n4A Thorburn Road, St. John’s, NL A1B 3L7\n\n"
             "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
