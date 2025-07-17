@@ -219,7 +219,7 @@ def verify_with_canada_post(address):
         return True, verified_address
     return False, address
 
-# --- Format verification results as HTML table (added as per your reference) ---
+# --- Format verification results as HTML table ---
 def format_verification_table(results):
     if not results:
         return ""
@@ -231,7 +231,15 @@ def format_verification_table(results):
           <td style="width:60%;font-size:17px;font-weight:700;color:{};">{}</td>
         </tr>
         <tr>
-          <td style="font-size:17px;font-weight:700;color:#008000;">Consistency Score:</td>
+          <td style="font-size:17px;font-weight:700;color:#008000;">Address Consistency Score:</td>
+          <td style="font-size:17px;color:#008000;">{}%</td>
+        </tr>
+        <tr>
+          <td style="font-size:17px;font-weight:700;color:#008000;">Name Consistency Score:</td>
+          <td style="font-size:17px;color:#008000;">{}%</td>
+        </tr>
+        <tr>
+          <td style="font-size:17px;font-weight:700;color:#008000;">Overall Consistency Score:</td>
           <td style="font-size:17px;color:#008000;">{}%</td>
         </tr>
         <tr>
@@ -241,6 +249,8 @@ def format_verification_table(results):
     """.format(
         "#008000" if results.get("final_result", False) else "#FF0000",
         "Passed" if results.get("final_result", False) else "Failed",
+        int(round(results.get("address_consistency_score", 0) * 100)),
+        int(round(results.get("name_consistency_score", 0) * 100)),
         int(round(results.get("document_consistency_score", 0) * 100)),
         int(round(results.get("average_authenticity_score", 0) * 100))
     )
@@ -251,7 +261,11 @@ def format_verification_table(results):
           <td style="font-weight:600;font-size:15px;color:#008000;">{}</td>
         </tr>
         <tr>
-          <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Similarity to Expected:</td>
+          <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Document {} Full Name:</td>
+          <td style="font-weight:600;font-size:15px;color:#008000;">{}</td>
+        </tr>
+        <tr>
+          <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Address Similarity to Expected:</td>
           <td style="font-weight:600;font-size:15px;color:#008000;">{}%</td>
         </tr>
         <tr>
@@ -269,6 +283,8 @@ def format_verification_table(results):
         """.format(
             idx + 1,
             results.get(f"extracted_address_{idx+1}", "Not provided"),
+            idx + 1,
+            results.get(f"extracted_name_{idx+1}", "Not provided"),
             int(round(results.get(f"similarity_to_expected_{idx+1}", 0) * 100)),
             "#008000" if results.get(f"address_match_{idx+1}", False) else "#FF0000",
             "Yes" if results.get(f"address_match_{idx+1}", False) else "No",
@@ -289,37 +305,44 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         results = {}
         kyc_fields = {}
         addresses = []
+        names = []
         authenticity_scores = []
         for idx, file in enumerate(files):
             text = extract_text_from_file(file.name)
             address = extract_address_with_llm(text, model_choice)
+            fields = extract_kyc_fields(text, model_choice)
+            name = fields.get("full_name", "Not provided")
             sim, match = semantic_match(address, expected_address)
             verified, canada_post_address = verify_with_canada_post(address)
             auth_score, _ = semantic_match(address, canada_post_address)
             authenticity_scores.append(auth_score)
-            fields = extract_kyc_fields(text, model_choice)
             addresses.append(address)
+            names.append(name)
             results[f"extracted_address_{idx+1}"] = address
+            results[f"extracted_name_{idx+1}"] = name
             results[f"similarity_to_expected_{idx+1}"] = round(sim, 3)
             results[f"address_match_{idx+1}"] = match
             results[f"canada_post_verified_{idx+1}"] = verified
             results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
             kyc_fields[f"document_{idx+1}"] = filter_non_null_fields(fields)
 
-        consistency_score, consistent = semantic_match(addresses[0], addresses[1], threshold=consistency_threshold)
+        address_consistency_score, address_consistent = semantic_match(addresses[0], addresses[1], threshold=consistency_threshold)
+        name_consistency_score, name_consistent = semantic_match(names[0], names[1], threshold=consistency_threshold) if names[0] != "Not provided" and names[1] != "Not provided" else (0, False)
+        consistency_score = (address_consistency_score + name_consistency_score) / 2 if names[0] != "Not provided" and names[1] != "Not provided" else address_consistency_score
         avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
+        results["address_consistency_score"] = round(address_consistency_score, 3)
+        results["name_consistency_score"] = round(name_consistency_score, 3)
         results["document_consistency_score"] = round(consistency_score, 3)
-        results["documents_consistent"] = consistent
+        results["documents_consistent"] = address_consistent and (name_consistent or names[0] == "Not provided" or names[1] == "Not provided")
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
-        # Final result now strictly requires consistency score to meet or exceed the threshold
+        # Final result requires address consistency, name consistency (if names are provided), and all address matches/verifications
         results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and (consistency_score >= consistency_threshold)
 
         status = (
-            f"✅ <b style='color:green;'>Verification Passed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
+            f"✅ <b style='color:green;'>Verification Passed</b><br>Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>Name Consistency Score: <b>{int(round(name_consistency_score * 100))}%</b><br>Overall Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
             if results["final_result"]
-            else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
+            else f"❌ <b style='color:red;'>Verification Failed</b><br>Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>Name Consistency Score: <b>{int(round(name_consistency_score * 100))}%</b><br>Overall Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
-        # --- Return the new HTML table for the KYC Output section ---
         return status, format_verification_table(results), kyc_fields
     except Exception as e:
         return f"❌ Error: {str(e)}", "", {}
@@ -417,7 +440,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
             gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
             details = gr.Accordion("View Full Verification Details", open=False)
             with details:
-                output_html = gr.HTML(label="KYC Output")  # changed from gr.JSON to gr.HTML for table rendering
+                output_html = gr.HTML(label="KYC Output")
                 gr.Markdown("### Extracted Document Details")
                 document_info_json = gr.JSON(label="Document Fields")
     verify_btn.click(
