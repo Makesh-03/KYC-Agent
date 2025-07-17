@@ -225,7 +225,7 @@ Text:
             }
 
 def semantic_match(text1, text2, threshold=0.82):
-    embeddings = similarity_model.encode([text1, text)2], convert_to_tensor=True)
+    embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
     return sim.item(), sim.item() >= threshold
 
