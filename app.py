@@ -221,7 +221,7 @@ def verify_with_canada_post(address):
 
 def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
     if not files or len(files) < 2:
-        return "❌ Please upload at least two documents.", {}, {}
+        return "❌ Please upload at least two documents.", "", {}
     try:
         results = {}
         kyc_fields = {}
@@ -256,9 +256,70 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             if results["final_result"]
             else f"❌ <b style='color:red;'>Verification Failed</b><br>Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
-        return status, results, kyc_fields
+
+        # Generate verification table HTML
+        verification_html = ""
+        for idx in range(len([k for k in results.keys() if k.startswith("extracted_address_")])):
+            doc_num = idx + 1
+            decision = results.get(f"address_match_{doc_num}") and results.get(f"canada_post_verified_{doc_num}")
+            decision_color = "#008000" if decision else "#FF0000"
+            reason = "Address matches expected and verified by Canada Post" if decision else "Address mismatch or not verified by Canada Post"
+            fields = kyc_fields.get(f"document_{doc_num}", {})
+            document_type = fields.get("document_type", "Not provided")
+            address = results.get(f"extracted_address_{doc_num}", "Not provided")
+            similarity = results.get(f"similarity_to_expected_{doc_num}", 0) * 100
+            authenticity = results.get(f"authenticity_score_{doc_num}", 0) * 100
+            verified = results.get(f"canada_post_verified_{doc_num}", False)
+            date_of_issue = fields.get("date_of_issue", "Not provided")
+            date_of_expiry = fields.get("date_of_expiry", "Not provided")
+            bg_reason = "#ffe6e6" if not decision else "#e6ffe6"
+            
+            verification_html += f"""
+            <div style="border-radius:16px;border:2px solid #A020F0; margin-bottom:32px; background:#f9f7ff;padding:18px 22px 22px 22px;box-shadow:0 3px 16px #0001;">
+                <div style="font-size:14px;font-weight:600;letter-spacing:0.3px;margin-bottom:10px;color:#333;">
+                    Document {doc_num}
+                </div>
+                <table style="width:100%;border:none;margin-bottom:12px;">
+                    <tr>
+                        <td style="width:40%;font-size:17px;font-weight:700;">Decision:</td>
+                        <td style="width:60%;font-size:17px;font-weight:700;color:{decision_color};">{'Accepted' if decision else 'Rejected'}</td>
+                    </tr>
+                    <tr>
+                        <td style="font-size:17px;font-weight:700;">Confidence:</td>
+                        <td style="font-size:17px;">{int(similarity)}%</td>
+                    </tr>
+                </table>
+                <div style="border-radius:8px;background:{bg_reason};padding:11px 14px 11px 14px;color:#720000;font-size:15.5px;margin-bottom:17px;">
+                    <span style="font-weight:bold;">Reason:</span><br>{reason}
+                </div>
+                <table style="width:100%;margin-top:10px;margin-bottom:5px;">
+                    <tr>
+                        <td style="font-weight:600;font-size:15px;border-bottom:1px solid #ddd;padding-bottom:3px;">Detected Document:</td>
+                        <td style="font-weight:600;font-size:15px;border-bottom:1px solid #ddd;padding-bottom:3px;">Extracted Address:</td>
+                    </tr>
+                    <tr>
+                        <td style="color:{'#008000' if decision else '#222'};font-weight:600;font-size:15px;">{document_type}</td>
+                        <td style="color:{'#008000' if decision else '#222'};font-weight:600;font-size:15px;">{address}</td>
+                    </tr>
+                    <tr>
+                        <td style="font-weight:600;font-size:15px;border-bottom:1px solid #ddd;padding-bottom:3px;">Canada Post Verified:</td>
+                        <td style="font-weight:600;font-size:15px;border-bottom:1px solid #ddd;padding-bottom:3px;">Authenticity Score:</td>
+                    </tr>
+                    <tr>
+                        <td style="color:{'#008000' if verified else '#FF0000'};font-weight:600;font-size:15px;">{'Yes' if verified else 'No'}</td>
+                        <td style="color:{'#008000' if authenticity >= 80 else '#FF0000'};font-weight:600;font-size:15px;">{int(authenticity)}%</td>
+                    </tr>
+                </table>
+                <div style="color:#555;font-size:14px;margin-top:7px;">
+                    <b>Issue Date:</b> {date_of_issue}<br>
+                    <b>Expiry Date:</b> {date_of_expiry}
+                </div>
+            </div>
+            """
+
+        return status, verification_html, kyc_fields
     except Exception as e:
-        return f"❌ Error: {str(e)}", {}, {}
+        return f"❌ Error: {str(e)}", "", {}
 
 # --- UI ---
 custom_css = """
@@ -330,67 +391,6 @@ h1 {
 }
 """
 
-def format_verification_table(results, kyc_fields):
-    html = ""
-    for idx in range(len([k for k in results.keys() if k.startswith("extracted_address_")])):
-        doc_num = idx + 1
-        decision = results.get(f"address_match_{doc_num}") and results.get(f"canada_post_verified_{doc_num}")
-        decision_color = "#008000" if decision else "#FF0000"
-        reason = "Address matches expected and verified by Canada Post" if decision else "Address mismatch or not verified by Canada Post"
-        fields = kyc_fields.get(f"document_{doc_num}", {})
-        document_type = fields.get("document_type", "Not provided")
-        address = results.get(f"extracted_address_{doc_num}", "Not provided")
-        similarity = results.get(f"similarity_to_expected_{doc_num}", 0) * 100
-        authenticity = results.get(f"authenticity_score_{doc_num}", 0) * 100
-        verified = results.get(f"canada_post_verified_{doc_num}", False)
-        date_of_issue = fields.get("date_of_issue", "Not provided")
-        date_of_expiry = fields.get("date_of_expiry", "Not provided")
-        bg_reason = "#ffe6e6" if not decision else "#e6ffe6"
-        
-        html += f"""
-        <div style="border-radius:16px;border:2px solid #A020F0; margin-bottom:32px; background:#f9f7ff;padding:18px 22px 22px 22px;box-shadow:0 3px 16px #0001;">
-            <div style="font-size:14px;font-weight:600;letter-spacing:0.3px;margin-bottom:10px;color:#333;">
-                Document {doc_num}
-            </div>
-            <table style="width:100%;border:none;margin-bottom:12px;">
-                <tr>
-                    <td style="width:40%;font-size:17px;font-weight:700;">Decision:</td>
-                    <td style="width:60%;font-size:17px;font-weight:700;color:{decision_color};">{'Accepted' if decision else 'Rejected'}</td>
-                </tr>
-                <tr>
-                    <td style="font-size:17px;font-weight:700;">Confidence:</td>
-                    <td style="font-size:17px;">{int(similarity)}%</td>
-                </tr>
-            </table>
-            <div style="border-radius:8px;background:{bg_reason};padding:11px 14px 11px 14px;color:#720000;font-size:15.5px;margin-bottom:17px;">
-                <span style="font-weight:bold;">Reason:</span><br>{reason}
-            </div>
-            <table style="width:100%;margin-top:10px;margin-bottom:5px;">
-                <tr>
-                    <td style="font-weight:600;font-size:15px;border-bottom:1px solid #ddd;padding-bottom:3px;">Detected Document:</td>
-                    <td style="font-weight:600;font-size:15px;border-bottom:1px solid #ddd;padding-bottom:3px;">Extracted Address:</td>
-                </tr>
-                <tr>
-                    <td style="color:{'#008000' if decision else '#222'};font-weight:600;font-size:15px;">{document_type}</td>
-                    <td style="color:{'#008000' if decision else '#222'};font-weight:600;font-size:15px;">{address}</td>
-                </tr>
-                <tr>
-                    <td style="font-weight:600;font-size:15px;border-bottom:1px solid #ddd;padding-bottom:3px;">Canada Post Verified:</td>
-                    <td style="font-weight:600;font-size:15px;border-bottom:1px solid #ddd;padding-bottom:3px;">Authenticity Score:</td>
-                </tr>
-                <tr>
-                    <td style="color:{'#008000' if verified else '#FF0000'};font-weight:600;font-size:15px;">{'Yes' if verified else 'No'}</td>
-                    <td style="color:{'#008000' if authenticity >= 80 else '#FF0000'};font-weight:600;font-size:15px;">{int(authenticity)}%</td>
-                </tr>
-            </table>
-            <div style="color:#555;font-size:14px;margin-top:7px;">
-                <b>Issue Date:</b> {date_of_issue}<br>
-                <b>Expiry Date:</b> {date_of_expiry}
-            </div>
-        </div>
-        """
-    return html
-
 with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
     gr.Markdown("# EZOFIS KYC Agent")
     with gr.Row():
@@ -420,13 +420,7 @@ with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
     verify_btn.click(
         fn=kyc_multi_verify,
         inputs=[file_inputs, expected_address, model_choice, consistency_threshold],
-        outputs=[status_html, verification_table, document_info_json],
-        _js="""(inputs) => {
-            const [files, expected_address, model_choice, consistency_threshold] = inputs;
-            return [files, expected_address, model_choice, consistency_threshold];
-        }""",
-        api_name="kyc_multi_verify",
-        postprocess=lambda x: (x[0], format_verification_table(x[1], x[2]), x[2])
+        outputs=[status_html, verification_table, document_info_json]
     )
 
 if __name__ == "__main__":
