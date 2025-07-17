@@ -43,55 +43,24 @@ def get_llm(model_choice):
 
 def clean_address_mistral(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
-    # Remove section numbers or dot-separated numbers (e.g., 8., 8.2) at the start
+    # Minimal filtering to remove section headers, preserve building number
     flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d+)?[\.\):])\s*)+", "", flattened)
     flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d+)?[\.\):]?\s*", "", flattened)
-    flattened = re.sub(r"^\d+\.\d+\s+", "", flattened)
-    # Match standalone numbers or numbers with apartment/unit notation, ensuring door number capture
-    match = re.search(
-        r"^(?:\d{1,5}[A-Za-z\-]?|(?:Apt|Unit|Suite|Door)\s*\d{1,5})\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
-        flattened,
-        re.IGNORECASE,
-    )
-    if match:
-        return match.group(0).strip()
-    # Fallback with stricter pattern for standalone numbers
+    # Check for basic address structure, fall back to original text if needed
+    if re.search(r"\d+\s+[\w\s,]+,\s*\w+,\s*[A-Z]{2},\s*[A-Z]\d[A-Z]\s*\d[A-Z]\d", flattened, re.IGNORECASE):
+        return flattened
     fallback = re.search(
-        r"^\d{1,5}(?![.\d])\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
+        r"(?:Apt|Unit|Suite|Door)?\s*\d{1,5}\s+[\w\s,.-]+,\s*\w+,\s*[A-Z]{2},\s*[A-Z]\d[A-Z]\s*\d[A-Z]\d",
         original_text.replace("\n", " "),
         re.IGNORECASE,
     )
-    if fallback:
-        return fallback.group(0).strip()
-    # If no match, try to extract any address-like pattern with door number from original text
-    fallback_alt = re.search(
-        r"(?:Apt|Unit|Suite|Door)\s*\d{1,5}\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
-        original_text.replace("\n", " "),
-        re.IGNORECASE,
-    )
-    if fallback_alt:
-        return fallback_alt.group(0).strip()
-    return flattened
+    return fallback.group(0).strip() if fallback else flattened
 
 def extract_address_with_llm(text, model_choice):
     if model_choice == "Mistral":
         template = (
-            "You are a strict document parser extracting Canadian addresses.\n\n"
-            "Your task is to extract ONLY the full Canadian mailing address from the document text. The address must include:\n"
-            "- A house or building number (must be a standalone number like '2', '742', '38A', or door/apartment/unit notation like 'Apt 2', 'Unit 2', 'Door 3', NOT a prefixed section number like '8.', '8.2', '8)', '9)') \n"
-            "- Street name\n"
-            "- City or town\n"
-            "- Province (use two-letter code like ON, NL)\n"
-            "- Postal code (format: A1A 1A1)\n\n"
-            "**IMPORTANT RULES:**\n"
-            "- DO NOT include section numbers (e.g., '8.', '9.', '8.2', '8)', '9)') or labels like 'Eyes:', 'Class:', etc.\n"
-            "- Ignore any lines starting with numbers followed by a dot or parenthesis (e.g., '8.', '8.2', '9)') as these are section headers, not addresses.\n"
-            "- The address should begin with the actual building number or door/apartment/unit number (e.g., '2 Thorburn Road' or 'Apt 2 Thorburn Road' or 'Door 3 Thorburn Road'), ensuring no dot-separated numbers (e.g., '8.2') are used as the building number.\n"
-            "- Prioritize extracting door numbers, apartment numbers, or unit numbers if present (e.g., 'Apt 2', 'Unit 3', 'Door 4').\n"
-            "- Never assume or hallucinate building numbers like '8.2' if the actual number is just '2'.\n"
-            "- If multiple addresses exist, pick the one that is clearly a Canadian residential or mailing address, ensuring all components (number, street, city, province, postal code) are included.\n\n"
-            "Return ONLY the address in one line. No extra words, explanations, or labels.\n\n"
-            "Example Output:\nApt 2, 742 Evergreen Terrace, Ottawa, ON K1A 0B1\nDoor 3, 123 Main St, St. John’s, NL A1A 1A1\n\n"
+            "You are an expert document parser. Extract the full Canadian mailing address from the document text, including building/house number, street name, city, province (two-letter code like ON, NL), and postal code (format: A1A 1A1). If a door, apartment, or unit number is present (e.g., 'Apt 2', 'Door 3'), include it. Return only the address in one line, no extra text.\n\n"
+            "Example Output:\nDoor 2, 123 Main St, St. John’s, NL A1A 1A1\n\n"
             "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
@@ -103,6 +72,7 @@ def extract_address_with_llm(text, model_choice):
     prompt = PromptTemplate(template=template, input_variables=["document_text"])
     chain = LLMChain(llm=get_llm(model_choice), prompt=prompt)
     result = chain.invoke({"document_text": text})
+    print(f"Raw LLM response for {model_choice}: {result['text'].strip()}")  # Debug print
     return clean_address_mistral(result["text"].strip(), original_text=text)
 
 def extract_kyc_fields(text, model_choice):
