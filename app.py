@@ -42,17 +42,12 @@ def get_llm(model_choice):
     )
 
 def clean_address_mistral(raw_response, original_text=""):
-    # Flatten and clean up initial formatting
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
-    
     # Remove section prefixes like '8.', '8)', '8:', '8.2', '8a)', etc.
     flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d+)?[\.\):a-zA-Z]?\s*)+)", "", flattened)
-    
     # Remove common misleading prefixes like "Section 8", "8.", "8)", "8.2"
     flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d+)?[\.\):]?\s*", "", flattened)
     flattened = re.sub(r"^\d+\.\d+\s+", "", flattened)
-
-    # Enhanced regex for Canadian address:
     match = re.search(
         r"^\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
@@ -304,8 +299,8 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
                         <td style="font-weight:600;font-size:15px;border-bottom:1px solid #4A4A4A;padding-bottom:3px;">Extracted Address:</td>
                     </tr>
                     <tr>
-                        <td style="color:{'#00FF00' if decision else '#00FF00'};font-weight:600;font-size:15px;">{document_type}</td>
-                        <td style="color:{'#00FF00' if decision else '#00FF00'};font-weight:600;font-size:15px;">{address}</td>
+                        <td style="color:#00FF00;font-weight:600;font-size:15px;">{document_type}</td>
+                        <td style="color:#00FF00;font-weight:600;font-size:15px;">{address}</td>
                     </tr>
                     <tr>
                         <td style="font-weight:600;font-size:15px;border-bottom:1px solid #4A4A4A;padding-bottom:3px;">Canada Post Verified:</td>
