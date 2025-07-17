@@ -46,11 +46,11 @@ def clean_address_mistral(raw_response, original_text=""):
     # Minimal filtering to remove section headers, preserve building number
     flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d+)?[\.\):])\s*)+", "", flattened)
     flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d+)?[\.\):]?\s*", "", flattened)
-    # Check for basic address structure with alphanumeric building number, fall back to original text if needed
-    if re.search(r"\d+[A-Za-z]?\s+[\w\s,]+,\s*\w+,\s*[A-Z]{2},\s*[A-Z]\d[A-Z]\s*\d[A-Z]\d", flattened, re.IGNORECASE):
+    # Check for basic address structure with alphanumeric building number, allowing optional space
+    if re.search(r"\d+\s*[A-Za-z]?\s+[\w\s,]+,\s*\w+,\s*[A-Z]{2},\s*[A-Z]\d[A-Z]\s*\d[A-Z]\d", flattened, re.IGNORECASE):
         return flattened
     fallback = re.search(
-        r"(?:Apt|Unit|Suite|Door)?\s*\d+[A-Za-z]?\s+[\w\s,.-]+,\s*\w+,\s*[A-Z]{2},\s*[A-Z]\d[A-Z]\s*\d[A-Z]\d",
+        r"(?:Apt|Unit|Suite|Door)?\s*\d+\s*[A-Za-z]?\s+[\w\s,.-]+,\s*\w+,\s*[A-Z]{2},\s*[A-Z]\d[A-Z]\s*\d[A-Z]\d",
         original_text.replace("\n", " "),
         re.IGNORECASE,
     )
@@ -59,8 +59,8 @@ def clean_address_mistral(raw_response, original_text=""):
 def extract_address_with_llm(text, model_choice):
     if model_choice == "Mistral":
         template = (
-            "You are an expert document parser. Extract the full Canadian mailing address from the document text, including the building/house number (e.g., '2', '4A', 'Apt 2', 'Door 3'), street name, city, province (two-letter code like ON, NL), and postal code (format: A1A 1A1). The building number must be included, even if it appears after the street name or in a non-standard format (e.g., with a letter like '4A'); ignore section headers (e.g., '8.', '8.2', '9)'). Return only the address in one line, no extra text or notes.\n\n"
-            "Example Output:\nDoor 2, 123 Main St, St. John’s, NL A1A 1A1\n4A Thorburn Road, St. John’s, NL A1B 3L7\n2 Thorburn Road, St. John’s, NL A1B 3L7\n\n"
+            "You are an expert document parser. Extract the full Canadian mailing address from the document text, including the building/house number (e.g., '2', '4A', '4 A', 'Apt 2', 'Door 3'), street name, city, province (two-letter code like ON, NL), and postal code (format: A1A 1A1). The building number must be included, even if it appears after the street name or in a non-standard format (e.g., with a letter like '4A' or '4 A'); ignore section headers (e.g., '8.', '8.2', '9)'). Return only the address in one line, no extra text or notes.\n\n"
+            "Example Output:\nDoor 2, 123 Main St, St. John’s, NL A1A 1A1\n4A Thorburn Road, St. John’s, NL A1B 3L7\n4 A Thorburn Road, St. John’s, NL A1B 3L7\n2 Thorburn Road, St. John’s, NL A1B 3L7\n\n"
             "Text:\n{document_text}\n\nExtracted Address:"
         )
     else:
