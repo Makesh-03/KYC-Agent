@@ -42,60 +42,17 @@ def get_llm(model_choice):
     )
 
 def clean_address_mistral(raw_response, original_text=""):
+    # Flatten and clean up initial formatting
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
-    flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d)?[\.\):])\s*)+", "", flattened)
-    flattened = re.sub(r"(?i Ascending
-System: I'll modify the CSS to apply a dark theme to the tables in the verification HTML while keeping all the logic unchanged. The changes will include a dark background for the tables and green text for letters and numbers, ensuring the table structure remains intact.
-
-<xaiArtifact artifact_id="ca0ed6cf-25ce-45af-847c-09def4d0bfe7" artifact_version_id="9b93b898-61a2-41c3-8371-b66281a3ac18" title="kyc_verification_ui.py" contentType="text/python">
-import os
-import re
-import json
-import requests
-import gradio as gr
-from sentence_transformers import SentenceTransformer, util
-from unstructured.partition.pdf import partition_pdf
-from unstructured.partition.image import partition_image
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
-from langchain.chat_models import ChatOpenAI
-
-# --- Config ---
-similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
-
-def filter_non_null_fields(data):
-    return {k: v for k, v in data.items() if v not in [None, "null", "", "None", "Not provided"]}
-
-def extract_text_from_file(file_path):
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext == ".pdf":
-        elements = partition_pdf(file_path)
-    elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
-        elements = partition_image(filename=file_path)
-    else:
-        raise ValueError("Unsupported file type.")
-    return "\n".join([str(e) for e in elements])
-
-def get_llm(model_choice):
-    model_map = {
-        "Mistral": "mistralai/Mistral-7B-Instruct-v0.2",
-        "OpenAI": "openai/gpt-4o"
-    }
-    return ChatOpenAI(
-        temperature=0.2,
-        model_name=model_map[model_choice],
-        base_url="https://openrouter.ai/api/v1",
-        openai_api_key=OPENROUTER_API_KEY,
-        max_tokens=2000,
-    )
-
-def clean_address_mistral(raw_response, original_text=""):
-    flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
-    flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d)?[\.\):])\s*)+", "", flattened)
-    flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d)?[\.\):]?\s*", "", flattened)
+    
+    # Remove section prefixes like '8.', '8)', '8:', '8.2', '8a)', etc.
+    flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d+)?[\.\):a-zA-Z]?\s*)+)", "", flattened)
+    
+    # Remove common misleading prefixes like "Section 8", "8.", "8)", "8.2"
+    flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d+)?[\.\):]?\s*", "", flattened)
     flattened = re.sub(r"^\d+\.\d+\s+", "", flattened)
+
+    # Enhanced regex for Canadian address:
     match = re.search(
         r"^\d{1,5}[A-Za-z\-]?\s+[\w\s.,'-]+?,\s*\w+,\s*[A-Z]{2},?\s*[A-Z]\d[A-Z][ ]?\d[A-Z]\d",
         flattened,
