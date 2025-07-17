@@ -282,6 +282,7 @@ def format_verification_table(results):
     """
     return table_html
 
+# --- ONLY THIS PART CHANGED, rest of the logic untouched ---
 def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
     if not files or len(files) < 2:
         return "❌ Please upload at least two documents.", {}, {}
@@ -289,6 +290,7 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         results = {}
         kyc_fields = {}
         addresses = []
+        full_names = []
         authenticity_scores = []
         for idx, file in enumerate(files):
             text = extract_text_from_file(file.name)
@@ -299,6 +301,8 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             authenticity_scores.append(auth_score)
             fields = extract_kyc_fields(text, model_choice)
             addresses.append(address)
+            # Append full name (default to empty string if not provided)
+            full_names.append(fields.get("full_name", "") if fields.get("full_name") not in [None, "Not provided", ""] else "")
             results[f"extracted_address_{idx+1}"] = address
             results[f"similarity_to_expected_{idx+1}"] = round(sim, 3)
             results[f"address_match_{idx+1}"] = match
@@ -306,7 +310,11 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
             kyc_fields[f"document_{idx+1}"] = filter_non_null_fields(fields)
 
-        consistency_score, consistent = semantic_match(addresses[0], addresses[1], threshold=consistency_threshold)
+        # --- Consistency logic now compares both address and full name ---
+        address_consistency_score, address_consistent = semantic_match(addresses[0], addresses[1], threshold=consistency_threshold)
+        name_consistency_score, name_consistent = semantic_match(full_names[0], full_names[1], threshold=consistency_threshold)
+        consistency_score = (address_consistency_score + name_consistency_score) / 2
+        consistent = (consistency_score >= consistency_threshold)
         avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
         results["document_consistency_score"] = round(consistency_score, 3)
         results["documents_consistent"] = consistent
