@@ -329,22 +329,30 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
             kyc_fields[f"document_{idx+1}"] = filter_non_null_fields(fields)
 
-        address_consistency_score, address_consistent = semantic_match(addresses[0], addresses[1], threshold=consistency_threshold)
-        name_consistency_score, name_consistent = semantic_match(names[0], names[1], threshold=consistency_threshold) if names[0] != "Not provided" and names[1] != "Not provided" else (0, False)
-        consistency_score = (address_consistency_score + name_consistency_score) / 2 if names[0] != "Not provided" and names[1] != "Not provided" else address_consistency_score
+        address_consistency_score, address_consistent = semantic_match(
+            addresses[0], addresses[1], threshold=consistency_threshold
+        )
         avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
         results["address_consistency_score"] = round(address_consistency_score, 3)
-        results["name_consistency_score"] = round(name_consistency_score, 3)
-        results["document_consistency_score"] = round(consistency_score, 3)
-        results["documents_consistent"] = address_consistent and (name_consistent or names[0] == "Not provided" or names[1] == "Not provided")
+        # Set name score as info only, does not affect pass/fail
+        results["name_consistency_score"] = (
+            semantic_match(names[0], names[1])[0]
+            if names[0] != "Not provided" and names[1] != "Not provided"
+            else 0
+        )
+        results["document_consistency_score"] = round(address_consistency_score, 3)
+        results["documents_consistent"] = address_consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
-        # Final result requires address consistency, name consistency (if names are provided), and all address matches/verifications
-        results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"] for i in range(len(files))]) and (consistency_score >= consistency_threshold)
+        # Final result requires address consistency and all address matches/verifications (names do NOT affect final_result)
+        results["final_result"] = all([
+            results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"]
+            for i in range(len(files))
+        ]) and (address_consistency_score >= consistency_threshold)
 
         status = (
-            f"✅ <b style='color:green;'>Verification Passed</b><br>Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>Name Consistency Score: <b>{int(round(name_consistency_score * 100))}%</b><br>Overall Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
+            f"✅ <b style='color:green;'>Verification Passed</b><br>Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
             if results["final_result"]
-            else f"❌ <b style='color:red;'>Verification Failed</b><br>Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>Name Consistency Score: <b>{int(round(name_consistency_score * 100))}%</b><br>Overall Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
+            else f"❌ <b style='color:red;'>Verification Failed</b><br>Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
         return status, format_verification_table(results), kyc_fields
     except Exception as e:
