@@ -13,7 +13,7 @@ from langchain.chat_models import ChatOpenAI
 # --- Config ---
 similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-CANADA_POST_API_KEY = os.getenv("CANADA_POST_API_KEY")
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")  # <-- use this now
 
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None", "Not provided"]}
@@ -97,11 +97,8 @@ def extract_kyc_fields(text, model_choice):
     template = """
 You are an expert KYC document parser. Extract only factual data from the document.
 If any field is missing, set it to "Not provided". DO NOT infer.
-
 The address must include building/house number, street, city, province, postal code.
-
 Return only the JSON below:
-
 {{
   "document_type": "string or 'Not provided'",
   "document_number": "string or 'Not provided'",
@@ -127,7 +124,6 @@ Return only the JSON below:
   "signature_base64": "string or 'Not provided'",
   "additional_info": "string or 'Not provided'"
 }}
-
 Text:
 {text}
 """
@@ -206,18 +202,25 @@ def semantic_match(text1, text2, threshold=0.82):
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
     return sim.item(), sim.item() >= threshold
 
-def verify_with_canada_post(address):
-    if not CANADA_POST_API_KEY:
+# ----- GOOGLE MAPS ADDRESS VALIDATION -----
+def verify_with_google_maps(address):
+    if not GOOGLE_MAPS_API_KEY:
         return False, "No API key provided"
-    url = "https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws"
-    response = requests.get(
-        url, params={"Key": CANADA_POST_API_KEY, "Text": address, "Country": "CAN"}
-    )
-    items = response.json().get("Items", [])
-    if items:
-        verified_address = items[0].get("Text", address)
-        return True, verified_address
-    return False, address
+    url = "https://maps.googleapis.com/maps/api/geocode/json"
+    params = {
+        "address": address,
+        "region": "ca",  # restricts results to Canada
+        "key": GOOGLE_MAPS_API_KEY,
+    }
+    response = requests.get(url, params=params)
+    try:
+        data = response.json()
+        if data.get("status") == "OK" and data.get("results"):
+            formatted_address = data["results"][0].get("formatted_address", address)
+            return True, formatted_address
+        return False, address
+    except Exception:
+        return False, address
 
 # --- Format verification results as HTML table ---
 def format_verification_table(results):
@@ -273,7 +276,7 @@ def format_verification_table(results):
           <td style="font-weight:600;font-size:15px;color:{};">{}</td>
         </tr>
         <tr>
-          <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Canada Post Verified:</td>
+          <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Google Maps Verified:</td>
           <td style="font-weight:600;font-size:15px;color:{};">{}</td>
         </tr>
         <tr>
@@ -288,8 +291,8 @@ def format_verification_table(results):
             int(round(results.get(f"similarity_to_expected_{idx+1}", 0) * 100)),
             "#008000" if results.get(f"address_match_{idx+1}", False) else "#FF0000",
             "Yes" if results.get(f"address_match_{idx+1}", False) else "No",
-            "#008000" if results.get(f"canada_post_verified_{idx+1}", False) else "#FF0000",
-            "Yes" if results.get(f"canada_post_verified_{idx+1}", False) else "No",
+            "#008000" if results.get(f"google_maps_verified_{idx+1}", False) else "#FF0000",
+            "Yes" if results.get(f"google_maps_verified_{idx+1}", False) else "No",
             int(round(results.get(f"authenticity_score_{idx+1}", 0) * 100))
         )
     table_html += """
@@ -313,8 +316,8 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             fields = extract_kyc_fields(text, model_choice)
             name = fields.get("full_name", "Not provided")
             sim, match = semantic_match(address, expected_address)
-            verified, canada_post_address = verify_with_canada_post(address)
-            auth_score, _ = semantic_match(address, canada_post_address)
+            verified, google_maps_address = verify_with_google_maps(address)
+            auth_score, _ = semantic_match(address, google_maps_address)
             authenticity_scores.append(auth_score)
             addresses.append(address)
             names.append(name)
@@ -322,7 +325,7 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             results[f"extracted_name_{idx+1}"] = name
             results[f"similarity_to_expected_{idx+1}"] = round(sim, 3)
             results[f"address_match_{idx+1}"] = match
-            results[f"canada_post_verified_{idx+1}"] = verified
+            results[f"google_maps_verified_{idx+1}"] = verified
             results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
             kyc_fields[f"document_{idx+1}"] = filter_non_null_fields(fields)
 
@@ -336,7 +339,7 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         results["documents_consistent"] = address_consistent and (name_consistent or names[0] == "Not provided" or names[1] == "Not provided")
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
         # Final result requires address consistency, name consistency (if names are provided), and all address matches/verifications
-        results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"canada_post_verified_{i+1}"] for i in range(len(files))]) and (consistency_score >= consistency_threshold)
+        results["final_result"] = all([results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"] for i in range(len(files))]) and (consistency_score >= consistency_threshold)
 
         status = (
             f"✅ <b style='color:green;'>Verification Passed</b><br>Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>Name Consistency Score: <b>{int(round(name_consistency_score * 100))}%</b><br>Overall Consistency Score: <b>{int(round(consistency_score * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
