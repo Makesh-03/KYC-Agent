@@ -4,29 +4,67 @@ import json
 import requests
 import gradio as gr
 from sentence_transformers import SentenceTransformer, util
-from unstructured.partition.pdf import partition_pdf
-from unstructured.partition.image import partition_image
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain.chat_models import ChatOpenAI
+import time
+import mimetypes
 
 # --- Config ---
 similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")  # <-- use this now
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+UNSTRACT_API_KEY = os.getenv("UNSTRACT_API_KEY")
+UNSTRACT_BASE = "https://llmwhisperer-api.us-central.unstract.com/api/v2"
 
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None", "Not provided"]}
 
 def extract_text_from_file(file_path):
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext == ".pdf":
-        elements = partition_pdf(file_path)
-    elif ext in [".png", ".jpg", ".jpeg", ".bmp"]:
-        elements = partition_image(filename=file_path)
+    # Use Unstract Whisperer API (with API key) for PDF and images
+    filename = os.path.basename(file_path)
+    with open(file_path, "rb") as f:
+        file_bytes = f.read()
+
+    headers = {
+        "unstract-key": UNSTRACT_API_KEY,
+        "Content-Type": mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    }
+    up = requests.post(
+        f"{UNSTRACT_BASE}/whisper",
+        headers=headers,
+        data=file_bytes,
+    )
+    if up.status_code not in (200, 202):
+        raise RuntimeError(f"OCR upload failed ({up.status_code})")
+    token = up.json()["whisper_hash"]
+
+    # Poll /whisper-status up to 3 min
+    for poll_sec in range(180):
+        time.sleep(1)
+        status_resp = requests.get(
+            f"{UNSTRACT_BASE}/whisper-status?whisper_hash={token}",
+            headers={"unstract-key": UNSTRACT_API_KEY},
+        )
+        status_json = status_resp.json()
+        status = status_json.get("status")
+        # Uncomment to debug: print(f"[{poll_sec+1}s] Whisper-status: {status_json}")
+        if status == "processed":
+            break
+        elif status == "failed":
+            raise RuntimeError(f"Unstract Whisperer processing failed: {status_json}")
     else:
-        raise ValueError("Unsupported file type.")
-    return "\n".join([str(e) for e in elements])
+        raise RuntimeError("Unstract Whisperer API timeout waiting for job completion.")
+
+    # GET /whisper-retrieve
+    ret = requests.get(
+        f"{UNSTRACT_BASE}/whisper-retrieve?whisper_hash={token}&text_only=true",
+        headers={"unstract-key": UNSTRACT_API_KEY},
+    )
+    try:
+        return ret.json().get("result_text") or ret.text
+    except Exception as e:
+        return ret.text
 
 def get_llm(model_choice):
     model_map = {
