@@ -272,7 +272,7 @@ def format_verification_table(results):
 
     # Header
     table_html = f"""
-    <div style="background-color:#111; color:white; border:2px solid #a64dff; padding:16px; border-radius:12px; font-family:Arial, sans-serif;">
+    <div style="background-color:#111; color:white; border:2px solid #a64dff; padding:16px; border-radius:12px; font-family:Arial, sans-serif; overflow-x:auto;">
 
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; border-bottom:1px solid #a64dff; padding-bottom:10px; margin-bottom:16px;">
         <span style="font-weight:bold;">Final Result: <span style="color:{final_color};">{final_text}</span></span>
@@ -282,16 +282,16 @@ def format_verification_table(results):
         <span><strong>Avg Authenticity:</strong> {int(results.get("average_authenticity_score", 0)*100)}%</span>
       </div>
 
-      <table style="width:100%; border-collapse:collapse; font-size:14px;">
+      <table style="width:100%; min-width:600px; border-collapse:collapse; font-size:14px; table-layout:fixed;">
         <thead>
           <tr style="background-color:#222;">
-            <th style="padding:10px; border-bottom:2px solid #a64dff;">Doc</th>
-            <th style="padding:10px; border-bottom:2px solid #a64dff;">Address</th>
-            <th style="padding:10px; border-bottom:2px solid #a64dff;">Full Name</th>
-            <th style="padding:10px; border-bottom:2px solid #a64dff;">Similarity %</th>
-            <th style="padding:10px; border-bottom:2px solid #a64dff;">Address Match</th>
-            <th style="padding:10px; border-bottom:2px solid #a64dff;">Google Maps</th>
-            <th style="padding:10px; border-bottom:2px solid #a64dff;">Authenticity %</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff; width:5%;">Doc</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff; width:25%;">Address</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff; width:25%;">Full Name</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Similarity %</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Address Match</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Google Maps</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff; width:15%;">Authenticity %</th>
           </tr>
         </thead>
         <tbody>
@@ -312,13 +312,13 @@ def format_verification_table(results):
 
         table_html += f"""
         <tr>
-            <td style="padding:8px; border-bottom:1px solid #333;">{idx+1}</td>
-            <td style="padding:8px; border-bottom:1px solid #333; white-space:normal; word-break:break-word;">{address}</td>
-            <td style="padding:8px; border-bottom:1px solid #333; white-space:normal; word-break:break-word;">{name}</td>
-            <td style="padding:8px; border-bottom:1px solid #333;">{sim_pct}%</td>
-            <td style="padding:8px; border-bottom:1px solid #333; color:{match_color}; font-weight:700;">{match_text}</td>
-            <td style="padding:8px; border-bottom:1px solid #333; color:{maps_color}; font-weight:700;">{maps_text}</td>
-            <td style="padding:8px; border-bottom:1px solid #333;">{auth_pct}%</td>
+            <td style="padding:8px; border-bottom:1px solid #333; width:5%; text-align:center;">{idx+1}</td>
+            <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-all; overflow-wrap:break-word;">{address}</td>
+            <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-all; overflow-wrap:break-word;">{name}</td>
+            <td style="padding:8px; border-bottom:1px solid #333; width:10%; text-align:center;">{sim_pct}%</td>
+            <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{match_color}; font-weight:700; text-align:center;">{match_text}</td>
+            <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{maps_color}; font-weight:700; text-align:center;">{maps_text}</td>
+            <td style="padding:8px; border-bottom:1px solid #333; width:15%; text-align:center;">{auth_pct}%</td>
         </tr>
         """
 
