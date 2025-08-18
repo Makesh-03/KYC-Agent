@@ -265,62 +265,74 @@ def verify_with_google_maps(address):
 def format_verification_table(results):
     if not results:
         return ""
+
+    # Main wrapper + dark theme
     table_html = """
-    <div style="border-radius:16px;border:2px solid #A020F0;margin-bottom:32px;background:#D3D3D3;padding:18px 22px 22px 22px;box-shadow:0 3px 16px #0001;">
+    <div style="border-radius:16px;border:2px solid #A020F0;margin-bottom:32px;
+                background:#1e1e1e;padding:18px 22px 22px 22px;
+                box-shadow:0 3px 16px #0003;color:#f5f5f5;">
     <table style="width:100%;border:none;margin-bottom:12px;">
     <tr>
-        <td style="width:40%;font-size:17px;font-weight:700;color:#008000;">Final Result:</td>
+        <td style="width:40%;font-size:17px;font-weight:700;color:#bb86fc;">Final Result:</td>
         <td style="width:60%;font-size:17px;font-weight:700;color:{};">{}</td>
     </tr>
     <tr>
-        <td style="font-size:17px;font-weight:700;color:#008000;">Address Consistency Score:</td>
-        <td style="font-size:17px;color:#008000;">{}%</td>
+        <td style="font-size:16px;font-weight:600;color:#bb86fc;">Address Consistency Score:</td>
+        <td style="font-size:16px;color:#f5f5f5;">{}%</td>
     </tr>
     <tr>
-        <td style="font-size:17px;font-weight:700;color:#008000;">Name Consistency Score:</td>
-        <td style="font-size:17px;color:#008000;">{}%</td>
+        <td style="font-size:16px;font-weight:600;color:#bb86fc;">Name Consistency Score:</td>
+        <td style="font-size:16px;color:#f5f5f5;">{}%</td>
     </tr>
     <tr>
-        <td style="font-size:17px;font-weight:700;color:#008000;">Overall Consistency Score:</td>
-        <td style="font-size:17px;color:#008000;">{}%</td>
+        <td style="font-size:16px;font-weight:600;color:#bb86fc;">Overall Consistency Score:</td>
+        <td style="font-size:16px;color:#f5f5f5;">{}%</td>
     </tr>
     <tr>
-        <td style="font-size:17px;font-weight:700;color:#008000;">Average Authenticity Score:</td>
-        <td style="font-size:17px;color:#008000;">{}%</td>
+        <td style="font-size:16px;font-weight:600;color:#bb86fc;">Average Authenticity Score:</td>
+        <td style="font-size:16px;color:#f5f5f5;">{}%</td>
     </tr>
     """.format(
-        "#008000" if results.get("final_result", False) else "#FF0000",
+        "#00ff7f" if results.get("final_result", False) else "#ff4d4d",
         "Passed" if results.get("final_result", False) else "Failed",
         int(round(results.get("address_consistency_score", 0) * 100)),
         int(round(results.get("name_consistency_score", 0) * 100)),
         int(round(results.get("document_consistency_score", 0) * 100)),
         int(round(results.get("average_authenticity_score", 0) * 100))
     )
+
+    # Loop through documents
     for idx in range(len([k for k in results.keys() if k.startswith("extracted_address_")])):
         table_html += """
         <tr>
-            <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Document {} Address:</td>
-            <td style="font-weight:600;font-size:15px;color:#008000;">{}</td>
+            <td style="font-weight:600;font-size:15px;border-bottom:1px solid #444;
+                       padding-bottom:4px;color:#bb86fc;">Document {} Address:</td>
+            <td style="font-weight:600;font-size:15px;color:#f5f5f5;">{}</td>
         </tr>
         <tr>
-            <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Document {} Full Name:</td>
-            <td style="font-weight:600;font-size:15px;color:#008000;">{}</td>
+            <td style="font-weight:600;font-size:15px;border-bottom:1px solid #444;
+                       padding-bottom:4px;color:#bb86fc;">Document {} Full Name:</td>
+            <td style="font-weight:600;font-size:15px;color:#f5f5f5;">{}</td>
         </tr>
         <tr>
-            <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Address Similarity to Expected:</td>
-            <td style="font-weight:600;font-size:15px;color:#008000;">{}%</td>
+            <td style="font-weight:600;font-size:15px;border-bottom:1px solid #444;
+                       padding-bottom:4px;color:#bb86fc;">Address Similarity to Expected:</td>
+            <td style="font-weight:600;font-size:15px;color:#f5f5f5;">{}%</td>
         </tr>
         <tr>
-            <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Address Match:</td>
+            <td style="font-weight:600;font-size:15px;border-bottom:1px solid #444;
+                       padding-bottom:4px;color:#bb86fc;">Address Match:</td>
             <td style="font-weight:600;font-size:15px;color:{};">{}</td>
         </tr>
         <tr>
-            <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Google Maps Verified:</td>
+            <td style="font-weight:600;font-size:15px;border-bottom:1px solid #444;
+                       padding-bottom:4px;color:#bb86fc;">Google Maps Verified:</td>
             <td style="font-weight:600;font-size:15px;color:{};">{}</td>
         </tr>
         <tr>
-            <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Authenticity Score:</td>
-            <td style="font-weight:600;font-size:15px;color:#008000;">{}%</td>
+            <td style="font-weight:600;font-size:15px;border-bottom:1px solid #444;
+                       padding-bottom:4px;color:#bb86fc;">Authenticity Score:</td>
+            <td style="font-weight:600;font-size:15px;color:#f5f5f5;">{}%</td>
         </tr>
         """.format(
             idx + 1,
@@ -328,12 +340,13 @@ def format_verification_table(results):
             idx + 1,
             results.get(f"extracted_name_{idx+1}", "Not provided"),
             int(round(results.get(f"similarity_to_expected_{idx+1}", 0) * 100)),
-            "#008000" if results.get(f"address_match_{idx+1}", False) else "#FF0000",
+            "#00ff7f" if results.get(f"address_match_{idx+1}", False) else "#ff4d4d",
             "Yes" if results.get(f"address_match_{idx+1}", False) else "No",
-            "#008000" if results.get(f"google_maps_verified_{idx+1}", False) else "#FF0000",
+            "#00ff7f" if results.get(f"google_maps_verified_{idx+1}", False) else "#ff4d4d",
             "Yes" if results.get(f"google_maps_verified_{idx+1}", False) else "No",
             int(round(results.get(f"authenticity_score_{idx+1}", 0) * 100))
         )
+
     table_html += """
     </table>
     </div>
