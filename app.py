@@ -7,10 +7,11 @@ import re
 import os
 import time
 import mimetypes
+from textwrap import dedent
 from sentence_transformers import SentenceTransformer, util
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-from langchain_community.chat_models import ChatOpenAI  # keep if this is what your env uses
+from langchain_community.chat_models import ChatOpenAI
 
 # ── MUST be the first Streamlit call ───────────────────────────────────────────
 st.set_page_config(page_title="EZOFIS KYC Agent", page_icon="🔍", layout="wide")
@@ -20,7 +21,7 @@ st.set_page_config(page_title="EZOFIS KYC Agent", page_icon="🔍", layout="wide
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 
-# EXACTLY as in your Gradio reference
+# EXACTLY as in your working Gradio reference
 UNSTRACT_API_KEY = os.getenv("UNSTRACT_API_KEY")
 UNSTRACT_BASE = "https://llmwhisperer-api.us-central.unstract.com/api/v2"
 
@@ -283,6 +284,7 @@ def verify_with_google_maps(address):
     except Exception:
         return False, address
 
+# ── Table builder fixed using `dedent` to avoid markdown code-block rendering ──
 def format_verification_table(results):
     if not results:
         return ""
@@ -293,31 +295,30 @@ def format_verification_table(results):
     doc_count = len([k for k in results.keys() if k.startswith("extracted_address_")])
 
     table_html = f"""
-    <div style="background-color:#111; color:white; border:2px solid #a64dff; padding:16px; border-radius:12px; font-family:Arial, sans-serif; overflow-x:auto;">
+<div style="background-color:#111; color:white; border:2px solid #a64dff; padding:16px; border-radius:12px; font-family:Arial, sans-serif; overflow-x:auto;">
 
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; border-bottom:1px solid #a64dff; padding-bottom:10px; margin-bottom:16px;">
-        <span style="font-weight:bold;">Final Result: <span style="color:{final_color};">{final_text}</span></span>
-        <span><strong>Address Consistency:</strong> {int(results.get("address_consistency_score", 0)*100)}%</span>
-        <span><strong>Name Consistency:</strong> {int(results.get("name_consistency_score", 0)*100)}%</span>
-        <span><strong>Overall Consistency:</strong> {int(results.get("document_consistency_score", 0)*100)}%</span>
-        <span><strong>Avg Authenticity:</strong> {int(results.get("average_authenticity_score", 0)*100)}%</span>
-      </div>
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; border-bottom:1px solid #a64dff; padding-bottom:10px; margin-bottom:16px;">
+    <span style="font-weight:bold;">Final Result: <span style="color:{final_color};">{final_text}</span></span>
+    <span><strong>Address Consistency:</strong> {int(results.get("address_consistency_score", 0)*100)}%</span>
+    <span><strong>Name Consistency:</strong> {int(results.get("name_consistency_score", 0)*100)}%</span>
+    <span><strong>Overall Consistency:</strong> {int(results.get("document_consistency_score", 0)*100)}%</span>
+    <span><strong>Avg Authenticity:</strong> {int(results.get("average_authenticity_score", 0)*100)}%</span>
+  </div>
 
-      <table style="width:100%; min-width:600px; border-collapse:collapse; font-size:14px; table-layout:fixed;">
-        <thead>
-          <tr style="background-color:#222;">
-            <th style="padding:10px; border-bottom:2px solid #a64dff; width:5%;">Doc</th>
-            <th style="padding:10px; border-bottom:2px solid #a64dff; width:25%;">Address</th>
-            <th style="padding:10px; border-bottom:2px solid #a64dff; width:25%;">Full Name</th>
-            <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Similarity %</th>
-            <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Address Match</th>
-            <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Google Maps</th>
-            <th style="padding:10px; border-bottom:2px solid #a64dff; width:15%;">Authenticity %</th>
-          </tr>
-        </thead>
-        <tbody>
-    """
-
+  <table style="width:100%; min-width:600px; border-collapse:collapse; font-size:14px; table-layout:fixed;">
+    <thead>
+      <tr style="background-color:#222;">
+        <th style="padding:10px; border-bottom:2px solid #a64dff; width:5%;">Doc</th>
+        <th style="padding:10px; border-bottom:2px solid #a64dff; width:25%;">Address</th>
+        <th style="padding:10px; border-bottom:2px solid #a64dff; width:25%;">Full Name</th>
+        <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Similarity %</th>
+        <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Address Match</th>
+        <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Google Maps</th>
+        <th style="padding:10px; border-bottom:2px solid #a64dff; width:15%;">Authenticity %</th>
+      </tr>
+    </thead>
+    <tbody>
+"""
     for idx in range(doc_count):
         address = results.get(f"extracted_address_{idx+1}", "Not provided")
         name = results.get(f"extracted_name_{idx+1}", "Not provided")
@@ -332,33 +333,35 @@ def format_verification_table(results):
         maps_color = "#00ff7f" if maps_ok else "#ff4d4d"
 
         table_html += f"""
-        <tr>
-            <td style="padding:8px; border-bottom:1px solid #333; width:5%; text-align:center;">{idx+1}</td>
-            <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-all; overflow-wrap:break-word;">{address}</td>
-            <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-word;">{name}</td>
-            <td style="padding:8px; border-bottom:1px solid #333; width:10%; text-align:center;">{sim_pct}%</td>
-            <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{match_color}; font-weight:700; text-align:center;">{match_text}</td>
-            <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{maps_color}; font-weight:700; text-align:center;">{maps_text}</td>
-            <td style="padding:8px; border-bottom:1px solid #333; width:15%; text-align:center;">{auth_pct}%</td>
-        </tr>
-        """
-
+      <tr>
+        <td style="padding:8px; border-bottom:1px solid #333; width:5%; text-align:center;">{idx+1}</td>
+        <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-all; overflow-wrap:break-word;">{address}</td>
+        <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-word;">{name}</td>
+        <td style="padding:8px; border-bottom:1px solid #333; width:10%; text-align:center;">{sim_pct}%</td>
+        <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{match_color}; font-weight:700; text-align:center;">{match_text}</td>
+        <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{maps_color}; font-weight:700; text-align:center;">{maps_text}</td>
+        <td style="padding:8px; border-bottom:1px solid #333; width:15%; text-align:center;">{auth_pct}%</td>
+      </tr>
+"""
     table_html += """
-        </tbody>
-      </table>
-    </div>
-    """
-    return table_html
+    </tbody>
+  </table>
+</div>
+"""
+    # ✅ Remove leading indentation so Markdown doesn't treat it as a code block
+    return dedent(table_html)
 
 def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
     if not files or len(files) < 2:
-        return "❌ Please upload at least two documents.", {}, {}
+        return "❌ Please upload at least two documents.", "", {}
+
     try:
         results = {}
         kyc_fields = {}
         addresses = []
         names = []
         authenticity_scores = []
+
         for idx, file in enumerate(files):
             text = extract_text_from_file(file)
             address = extract_address_with_llm(text, model_choice)
@@ -396,6 +399,7 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         results["document_consistency_score"] = round(address_consistency_score, 3)
         results["documents_consistent"] = address_consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
+
         results["final_result"] = all(
             [results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"] for i in range(len(files))]
         ) and (address_consistency_score >= consistency_threshold)
@@ -414,6 +418,7 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
                  f"Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
         return status, format_verification_table(results), kyc_fields
+
     except Exception as e:
         return f"❌ Error: {str(e)}", "", {}
 
@@ -423,79 +428,32 @@ def main():
         """
 <style>
 /* Overall dark background */
-.stApp {
-    background-color: #121212;
-    color: #ffffff;
-}
+.stApp { background-color: #121212; color: #ffffff; }
 
 /* Headers */
-h1 {
-    font-size: 42px !important;
-    font-weight: 900 !important;
-    color: #ffffff;
-    text-align: center;
-    margin-bottom: 20px;
-}
+h1 { font-size: 42px !important; font-weight: 900 !important; color: #ffffff; text-align: center; margin-bottom: 20px; }
 
 /* Purple numbered circle */
-.purple-circle {
-    display: inline-flex;
-    justify-content: center;
-    align-items: center;
-    background-color: #a020f0 !important;
-    color: white;
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    font-size: 18px;
-    font-weight: bold;
-    margin-right: 10px;
-}
+.purple-circle { display: inline-flex; justify-content: center; align-items: center; background-color: #a020f0 !important; color: white; border-radius: 50%; width: 40px; height: 40px; font-size: 18px; font-weight: bold; margin-right: 10px; }
 
 /* Input labels */
 .stFileUploader > div > div > div > label,
 .stTextInput > div > div > label,
 .stSelectbox > div > div > label,
-.stSlider > div > div > label {
-    font-size: 18px !important;
-    font-weight: bold !important;
-    color: #ffffff !important;
-}
+.stSlider > div > div > label { font-size: 18px !important; font-weight: bold !important; color: #ffffff !important; }
 
 /* Buttons */
-.stButton > button {
-    background-color: #a020f0 !important;
-    color: white !important;
-    font-weight: bold !important;
-    font-size: 16px !important;
-    padding: 10px 22px !important;
-    border-radius: 8px !important;
-    border: none !important;
-}
+.stButton > button { background-color: #a020f0 !important; color: white !important; font-weight: bold !important; font-size: 16px !important; padding: 10px 22px !important; border-radius: 8px !important; border: none !important; }
 
 /* Sliders */
-.stSlider > div > div > div > div {
-    background: #333333 !important;
-    border-radius: 5px;
-}
-.stSlider > div > div > div > div > div {
-    background: #a020f0 !important;
-    border-radius: 50%;
-}
+.stSlider > div > div > div > div { background: #333333 !important; border-radius: 5px; }
+.stSlider > div > div > div > div > div { background: #a020f0 !important; border-radius: 50%; }
 
 /* Expanders */
-.stExpander {
-    border: 2px solid #a020f0;
-    border-radius: 8px;
-    padding: 10px;
-    background-color: #1e1e1e;
-    color: #ffffff;
-}
+.stExpander { border: 2px solid #a020f0; border-radius: 8px; padding: 10px; background-color: #1e1e1e; color: #ffffff; }
 
 /* Markdown outputs inside app */
-.stMarkdown, .stText, .stCodeBlock {
-    color: #ffffff !important;
-}
+.stMarkdown, .stText, .stCodeBlock { color: #ffffff !important; }
 </style>
 """,
         unsafe_allow_html=True,
@@ -506,27 +464,27 @@ h1 {
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("<span class='purple-circle'>1</span> **Upload Documents (2 or more)**", unsafe_allow_html=True)
+        st.markdown("<span class='purple-circle'>1</span> <b>Upload Documents (2 or more)</b>", unsafe_allow_html=True)
         file_inputs = st.file_uploader(
             "Documents", accept_multiple_files=True, type=["pdf", "png", "jpg", "jpeg"]
         )
 
     with col2:
-        st.markdown("<span class='purple-circle'>2</span> **Enter Expected Address**", unsafe_allow_html=True)
+        st.markdown("<span class='purple-circle'>2</span> <b>Enter Expected Address</b>", unsafe_allow_html=True)
         expected_address = st.text_input("Expected Address", placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2")
 
-        st.markdown("<span class='purple-circle'>3</span> **Select LLM Provider**", unsafe_allow_html=True)
+        st.markdown("<span class='purple-circle'>3</span> <b>Select LLM Provider</b>", unsafe_allow_html=True)
         model_choice = st.selectbox("LLM Provider", ["Mistral", "OpenAI"], index=0)
 
-        st.markdown("<span class='purple-circle'>4</span> **Set Consistency Threshold**", unsafe_allow_html=True)
+        st.markdown("<span class='purple-circle'>4</span> <b>Set Consistency Threshold</b>", unsafe_allow_html=True)
         consistency_threshold = st.slider("Consistency Threshold", min_value=0.5, max_value=1.0, value=0.82, step=0.01)
 
     verify_btn = st.button("🔍 Verify Now")
 
-    st.markdown("<span class='purple-circle'>5</span> **KYC Verification Status**", unsafe_allow_html=True)
+    st.markdown("<span class='purple-circle'>5</span> <b>KYC Verification Status</b>", unsafe_allow_html=True)
     status_placeholder = st.empty()
 
-    st.markdown("<span class='purple-circle'>6</span> **KYC Verification Details**", unsafe_allow_html=True)
+    st.markdown("<span class='purple-circle'>6</span> <b>KYC Verification Details</b>", unsafe_allow_html=True)
     with st.expander("View Full Verification Details", expanded=False):
         output_placeholder = st.empty()
         st.markdown("### Extracted Document Details")
@@ -539,7 +497,8 @@ h1 {
                     file_inputs, expected_address, model_choice, consistency_threshold
                 )
                 status_placeholder.markdown(status, unsafe_allow_html=True)
-                output_placeholder.markdown(output_html, unsafe_allow_html=True)
+                # ✅ Ensure the table HTML is flush-left (no code block rendering)
+                output_placeholder.markdown(dedent(output_html), unsafe_allow_html=True)
                 json_placeholder.json(document_info_json)
         else:
             st.error(
