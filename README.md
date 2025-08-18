@@ -1,12 +1,13 @@
 ---
 title: KYC Agent
 emoji: 📚
-colorFrom: gray
-colorTo: red
-sdk: gradio
-sdk_version: 5.35.0
+colorFrom: red
+colorTo: purple
+sdk: streamlit
+sdk_version: 1.31.1
 app_file: app.py
 pinned: false
+license: mit
 short_description: customer verification
 ---
 
