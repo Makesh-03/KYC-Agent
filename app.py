@@ -1,27 +1,46 @@
 import os
 import re
 import json
+import time
+import mimetypes
+import tempfile
 import requests
-import gradio as gr
+import streamlit as st
+
 from sentence_transformers import SentenceTransformer, util
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain.chat_models import ChatOpenAI
-import time
-import mimetypes
 
-# --- Config ---
-similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
+# =========================
+# ----- CONFIG & MODELS ----
+# =========================
+st.set_page_config(page_title="EZOFIS KYC Agent", page_icon="🪪", layout="wide")
+
+# Environment variables
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 UNSTRACT_API_KEY = os.getenv("UNSTRACT_API_KEY")
 UNSTRACT_BASE = "https://llmwhisperer-api.us-central.unstract.com/api/v2"
 
+# SentenceTransformer model (load once)
+@st.cache_resource
+def get_similarity_model():
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+similarity_model = get_similarity_model()
+
+# =========================
+# --------- UTILS ---------
+# =========================
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None", "Not provided"]}
 
 def extract_text_from_file(file_path):
-    # Use Unstract Whisperer API (with API key) for PDF and images
+    """
+    Use Unstract Whisperer API (with API key) for PDF and images.
+    This is the SAME logic you provided.
+    """
     filename = os.path.basename(file_path)
     with open(file_path, "rb") as f:
         file_bytes = f.read()
@@ -40,7 +59,7 @@ def extract_text_from_file(file_path):
     token = up.json()["whisper_hash"]
 
     # Poll /whisper-status up to 3 min
-    for poll_sec in range(180):
+    for _ in range(180):
         time.sleep(1)
         status_resp = requests.get(
             f"{UNSTRACT_BASE}/whisper-status?whisper_hash={token}",
@@ -48,7 +67,6 @@ def extract_text_from_file(file_path):
         )
         status_json = status_resp.json()
         status = status_json.get("status")
-        # Uncomment to debug: print(f"[{poll_sec+1}s] Whisper-status: {status_json}")
         if status == "processed":
             break
         elif status == "failed":
@@ -63,7 +81,7 @@ def extract_text_from_file(file_path):
     )
     try:
         return ret.json().get("result_text") or ret.text
-    except Exception as e:
+    except Exception:
         return ret.text
 
 def get_llm(model_choice):
@@ -137,7 +155,7 @@ You are an expert KYC document parser. Extract only factual data from the docume
 If any field is missing, set it to "Not provided". DO NOT infer.
 The address must include building/house number, street, city, province, postal code.
 Return only the JSON below:
-{{
+{
   "document_type": "string or 'Not provided'",
   "document_number": "string or 'Not provided'",
   "country_of_issue": "string or 'Not provided'",
@@ -161,7 +179,7 @@ Return only the JSON below:
   "photo_base64": "string or 'Not provided'",
   "signature_base64": "string or 'Not provided'",
   "additional_info": "string or 'Not provided'"
-}}
+}
 Text:
 {text}
 """
@@ -240,14 +258,13 @@ def semantic_match(text1, text2, threshold=0.82):
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
     return sim.item(), sim.item() >= threshold
 
-# ----- GOOGLE MAPS ADDRESS VALIDATION -----
 def verify_with_google_maps(address):
     if not GOOGLE_MAPS_API_KEY:
         return False, "No API key provided"
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {
         "address": address,
-        "region": "ca",  # restricts results to Canada
+        "region": "ca",
         "key": GOOGLE_MAPS_API_KEY,
     }
     response = requests.get(url, params=params)
@@ -260,7 +277,6 @@ def verify_with_google_maps(address):
     except Exception:
         return False, address
 
-# --- Format verification results as HTML table ---
 def format_verification_table(results):
     if not results:
         return ""
@@ -295,7 +311,10 @@ def format_verification_table(results):
         int(round(results.get("document_consistency_score", 0) * 100)),
         int(round(results.get("average_authenticity_score", 0) * 100))
     )
-    for idx in range(len([k for k in results.keys() if k.startswith("extracted_address_")])):
+
+    doc_count = len([k for k in results.keys() if k.startswith("extracted_address_")])
+    for idx in range(doc_count):
+        i = idx + 1
         table_html += """
         <tr>
           <td style="font-weight:600;font-size:15px;border-bottom:1px solid #999;padding-bottom:3px;color:#008000;">Document {} Address:</td>
@@ -322,16 +341,16 @@ def format_verification_table(results):
           <td style="font-weight:600;font-size:15px;color:#008000;">{}%</td>
         </tr>
         """.format(
-            idx + 1,
-            results.get(f"extracted_address_{idx+1}", "Not provided"),
-            idx + 1,
-            results.get(f"extracted_name_{idx+1}", "Not provided"),
-            int(round(results.get(f"similarity_to_expected_{idx+1}", 0) * 100)),
-            "#008000" if results.get(f"address_match_{idx+1}", False) else "#FF0000",
-            "Yes" if results.get(f"address_match_{idx+1}", False) else "No",
-            "#008000" if results.get(f"google_maps_verified_{idx+1}", False) else "#FF0000",
-            "Yes" if results.get(f"google_maps_verified_{idx+1}", False) else "No",
-            int(round(results.get(f"authenticity_score_{idx+1}", 0) * 100))
+            i,
+            results.get(f"extracted_address_{i}", "Not provided"),
+            i,
+            results.get(f"extracted_name_{i}", "Not provided"),
+            int(round(results.get(f"similarity_to_expected_{i}", 0) * 100)),
+            "#008000" if results.get(f"address_match_{i}", False) else "#FF0000",
+            "Yes" if results.get(f"address_match_{i}", False) else "No",
+            "#008000" if results.get(f"google_maps_verified_{i}", False) else "#FF0000",
+            "Yes" if results.get(f"google_maps_verified_{i}", False) else "No",
+            int(round(results.get(f"authenticity_score_{i}", 0) * 100))
         )
     table_html += """
       </table>
@@ -341,24 +360,34 @@ def format_verification_table(results):
 
 def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
     if not files or len(files) < 2:
-        return "❌ Please upload at least two documents.", {}, {}
+        return "❌ Please upload at least two documents.", "", {}
+
     try:
         results = {}
         kyc_fields = {}
         addresses = []
         names = []
         authenticity_scores = []
+
         for idx, file in enumerate(files):
-            text = extract_text_from_file(file.name)
+            # Save uploaded file to a temp file so we can pass a path to OCR
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp:
+                tmp.write(file.read())
+                tmp_path = tmp.name
+
+            text = extract_text_from_file(tmp_path)
             address = extract_address_with_llm(text, model_choice)
             fields = extract_kyc_fields(text, model_choice)
             name = fields.get("full_name", "Not provided")
+
             sim, match = semantic_match(address, expected_address)
             verified, google_maps_address = verify_with_google_maps(address)
             auth_score, _ = semantic_match(address, google_maps_address)
+
             authenticity_scores.append(auth_score)
             addresses.append(address)
             names.append(name)
+
             results[f"extracted_address_{idx+1}"] = address
             results[f"extracted_name_{idx+1}"] = name
             results[f"similarity_to_expected_{idx+1}"] = round(sim, 3)
@@ -371,8 +400,8 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             addresses[0], addresses[1], threshold=consistency_threshold
         )
         avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
+
         results["address_consistency_score"] = round(address_consistency_score, 3)
-        # Set name score as info only, does not affect pass/fail
         results["name_consistency_score"] = (
             semantic_match(names[0], names[1])[0]
             if names[0] != "Not provided" and names[1] != "Not provided"
@@ -381,122 +410,123 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         results["document_consistency_score"] = round(address_consistency_score, 3)
         results["documents_consistent"] = address_consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
-        # Final result requires address consistency and all address matches/verifications (names do NOT affect final_result)
+
+        # Final result: address consistency + all address matches + all Google verifications
         results["final_result"] = all([
             results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"]
             for i in range(len(files))
         ]) and (address_consistency_score >= consistency_threshold)
 
         status = (
-            f"✅ <b style='color:green;'>Verification Passed</b><br>Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
+            f"✅ <b style='color:green;'>Verification Passed</b><br>"
+            f"Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>"
+            f"Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>"
+            f"Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>"
+            f"Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
             if results["final_result"]
-            else f"❌ <b style='color:red;'>Verification Failed</b><br>Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
+            else f"❌ <b style='color:red;'>Verification Failed</b><br>"
+                 f"Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>"
+                 f"Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>"
+                 f"Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>"
+                 f"Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
         return status, format_verification_table(results), kyc_fields
     except Exception as e:
         return f"❌ Error: {str(e)}", "", {}
 
-# --- UI ---
-custom_css = """
-.purple-small {
-    background-color: #a020f0 !important;
-    color: white !important;
-    font-weight: bold !important;
-    font-size: 16px !important;
-    padding: 8px 20px !important;
-    border-radius: 6px !important;
-    border: none !important;
-}
-h1 {
-    font-size: 42px !important;
-    font-weight: 900 !important;
-    color: white;
-    text-align: center;
-    margin-bottom: 20px;
-}
-.purple-circle {
-    display: inline-flex;
-    justify-content: center;
-    align-items: center;
-    background-color: #a020f0 !important;
-    color: white;
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    font-size: 18px;
-    font-weight: bold;
-    margin-right: 10px;
-}
-.gr-textbox label, .gr-file label, .gr-slider label {
-    font-size: 18px !important;
-    font-weight: bold;
-}
-.purple-button button {
-    background-color: #a020f0 !important;
-    color: white !important;
-    font-weight: bold !important;
-    font-size: 16px !important;
-    padding: 10px 22px !important;
-    border-radius: 8px !important;
-}
-.gr-slider input[type="range"] {
-    -webkit-appearance: none;
-    width: 100%;
-    height: 10px;
-    background: #d3d3d3;
-    outline: none;
-    border-radius: 5px;
-    margin-top: 10px;
-}
-.gr-slider input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 20px;
-    height: 20px;
-    background: #a020f0;
-    border-radius: 50%;
-    cursor: pointer;
-}
-.gr-slider input[type="range"]::-moz-range-thumb {
-    width: 20px;
-    height: 20px;
-    background: #a020f0;
-    border-radius: 50%;
-    cursor: pointer;
-}
-"""
+# =========================
+# ---------- UI -----------
+# =========================
 
-with gr.Blocks(css=custom_css, title="EZOFIS KYC Agent") as iface:
-    gr.Markdown("# EZOFIS KYC Agent")
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("<span class='purple-circle'>1</span> **Upload Documents (2 or more)**")
-            file_inputs = gr.File(file_types=[".pdf", ".png", ".jpg", ".jpeg"], file_count="multiple", label="Documents")
-        with gr.Column():
-            gr.Markdown("<span class='purple-circle'>2</span> **Enter Expected Address**")
-            expected_address = gr.Textbox(label="Expected Address", placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2")
-            gr.Markdown("<span class='purple-circle'>3</span> **Select LLM Provider**")
-            model_choice = gr.Dropdown(choices=["Mistral", "OpenAI"], value="Mistral", label="LLM Provider")
-            gr.Markdown("<span class='purple-circle'>4</span> **Set Consistency Threshold**")
-            consistency_threshold = gr.Slider(minimum=0.5, maximum=1.0, value=0.82, step=0.01, label="Consistency Threshold")
-            verify_btn = gr.Button("🔍 Verify Now", elem_classes="purple-small")
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("<span class='purple-circle'>5</span> **KYC Verification Status**")
-            status_html = gr.HTML()
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("<span class='purple-circle'>6</span> **KYC Verification Details**")
-            details = gr.Accordion("View Full Verification Details", open=False)
-            with details:
-                output_html = gr.HTML(label="KYC Output")
-                gr.Markdown("### Extracted Document Details")
-                document_info_json = gr.JSON(label="Document Fields")
-    verify_btn.click(
-        fn=kyc_multi_verify,
-        inputs=[file_inputs, expected_address, model_choice, consistency_threshold],
-        outputs=[status_html, output_html, document_info_json]
+DARK_PURPLE_CSS = """
+<style>
+:root, .stApp {
+  --purple: #a020f0;
+}
+html, body, .stApp { background: #0f1116 !important; }
+h1, h2, h3, h4, h5, h6, p, label, span, div { color: #E8E8E8 !important; }
+.block-container { padding-top: 1rem; padding-bottom: 2rem; }
+
+.purple-circle {
+  display:inline-flex;justify-content:center;align-items:center;
+  background-color: var(--purple); color:white; border-radius:50%;
+  width:40px;height:40px;font-size:18px;font-weight:800;margin-right:10px;
+}
+.purple-button {
+  background-color: var(--purple) !important; color:white !important; font-weight:700 !important;
+  border-radius: 10px !important; padding: 0.6rem 1.2rem !important; border: 0 !important;
+}
+.status-card {
+  border-radius:16px;border:2px solid var(--purple);background:#1c1f2b;
+  padding:18px 22px 22px 22px;box-shadow:0 3px 16px rgba(0,0,0,0.3);
+}
+</style>
+"""
+st.markdown(DARK_PURPLE_CSS, unsafe_allow_html=True)
+
+st.markdown("<h1 style='text-align:center;'>EZOFIS KYC Agent</h1>", unsafe_allow_html=True)
+
+col_left, col_right = st.columns([1,1])
+
+with col_left:
+    st.markdown("<span class='purple-circle'>1</span> **Upload Documents (2 or more)**", unsafe_allow_html=True)
+    uploaded_files = st.file_uploader(
+        "Documents",
+        type=["pdf", "png", "jpg", "jpeg"],
+        accept_multiple_files=True
     )
 
-if __name__ == "__main__":
-    iface.launch(share=True)
+with col_right:
+    st.markdown("<span class='purple-circle'>2</span> **Enter Expected Address**", unsafe_allow_html=True)
+    expected_address = st.text_input("Expected Address", placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2")
+
+    st.markdown("<span class='purple-circle'>3</span> **Select LLM Provider**", unsafe_allow_html=True)
+    model_choice = st.selectbox("LLM Provider", options=["Mistral", "OpenAI"], index=0)
+
+    st.markdown("<span class='purple-circle'>4</span> **Set Consistency Threshold**", unsafe_allow_html=True)
+    consistency_threshold = st.slider("Consistency Threshold", min_value=0.5, max_value=1.0, value=0.82, step=0.01)
+
+    run_btn = st.button("🔍 Verify Now", type="primary")
+
+st.markdown("<span class='purple-circle'>5</span> **KYC Verification Status**", unsafe_allow_html=True)
+status_placeholder = st.empty()
+
+st.markdown("<span class='purple-circle'>6</span> **KYC Verification Details**", unsafe_allow_html=True)
+exp = st.expander("View Full Verification Details", expanded=False)
+output_placeholder = exp.empty()
+with exp:
+    st.markdown("### Extracted Document Details")
+    json_placeholder = st.empty()
+
+# Run verification
+if run_btn:
+    if not uploaded_files or len(uploaded_files) < 2:
+        status_placeholder.error("❌ Please upload at least two documents.")
+    elif not expected_address.strip():
+        status_placeholder.error("❌ Please provide an expected address.")
+    else:
+        with st.spinner("Verifying..."):
+            status_html, details_html, kyc_fields = kyc_multi_verify(
+                uploaded_files, expected_address.strip(), model_choice, consistency_threshold
+            )
+
+        # Show status in a styled card
+        status_placeholder.markdown(
+            f"<div class='status-card'>{status_html}</div>",
+            unsafe_allow_html=True
+        )
+
+        # Details table (HTML)
+        if details_html:
+            output_placeholder.markdown(details_html, unsafe_allow_html=True)
+
+        # JSON fields
+        if kyc_fields:
+            json_placeholder.json(kyc_fields)
+
+# Footer note (optional env checks)
+with st.sidebar:
+    st.header("Configuration")
+    st.write("• OPENROUTER_API_KEY set:", bool(OPENROUTER_API_KEY))
+    st.write("• GOOGLE_MAPS_API_KEY set:", bool(GOOGLE_MAPS_API_KEY))
+    st.write("• UNSTRACT_API_KEY set:", bool(UNSTRACT_API_KEY))
