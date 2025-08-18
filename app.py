@@ -37,10 +37,6 @@ def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None", "Not provided"]}
 
 def extract_text_from_file(file_path):
-    """
-    Use Unstract Whisperer API (with API key) for PDF and images.
-    This is the SAME logic you provided.
-    """
     filename = os.path.basename(file_path)
     with open(file_path, "rb") as f:
         file_bytes = f.read()
@@ -49,22 +45,15 @@ def extract_text_from_file(file_path):
         "unstract-key": UNSTRACT_API_KEY,
         "Content-Type": mimetypes.guess_type(filename)[0] or "application/octet-stream"
     }
-    up = requests.post(
-        f"{UNSTRACT_BASE}/whisper",
-        headers=headers,
-        data=file_bytes,
-    )
+    up = requests.post(f"{UNSTRACT_BASE}/whisper", headers=headers, data=file_bytes)
     if up.status_code not in (200, 202):
         raise RuntimeError(f"OCR upload failed ({up.status_code})")
     token = up.json()["whisper_hash"]
 
-    # Poll /whisper-status up to 3 min
     for _ in range(180):
         time.sleep(1)
-        status_resp = requests.get(
-            f"{UNSTRACT_BASE}/whisper-status?whisper_hash={token}",
-            headers={"unstract-key": UNSTRACT_API_KEY},
-        )
+        status_resp = requests.get(f"{UNSTRACT_BASE}/whisper-status?whisper_hash={token}",
+                                   headers={"unstract-key": UNSTRACT_API_KEY})
         status_json = status_resp.json()
         status = status_json.get("status")
         if status == "processed":
@@ -74,28 +63,32 @@ def extract_text_from_file(file_path):
     else:
         raise RuntimeError("Unstract Whisperer API timeout waiting for job completion.")
 
-    # GET /whisper-retrieve
-    ret = requests.get(
-        f"{UNSTRACT_BASE}/whisper-retrieve?whisper_hash={token}&text_only=true",
-        headers={"unstract-key": UNSTRACT_API_KEY},
-    )
+    ret = requests.get(f"{UNSTRACT_BASE}/whisper-retrieve?whisper_hash={token}&text_only=true",
+                       headers={"unstract-key": UNSTRACT_API_KEY})
     try:
         return ret.json().get("result_text") or ret.text
     except Exception:
         return ret.text
 
 def get_llm(model_choice):
-    model_map = {
-        "Mistral": "mistralai/Mistral-7B-Instruct-v0.2",
-        "OpenAI": "openai/gpt-4o"
-    }
-    return ChatOpenAI(
-        temperature=0.2,
-        model_name=model_map[model_choice],
-        base_url="https://openrouter.ai/api/v1",
-        openai_api_key=OPENROUTER_API_KEY,
-        max_tokens=2000,
-    )
+    if model_choice == "Mistral":
+        # Correct Mistral endpoint via OpenRouter
+        return ChatOpenAI(
+            temperature=0.2,
+            model_name="mistralai/Mistral-7B-Instruct-v0.2",
+            base_url="https://openrouter.ai/api/v1",
+            openai_api_key=OPENROUTER_API_KEY,
+            max_tokens=2000,
+        )
+    else:
+        # OpenAI
+        return ChatOpenAI(
+            temperature=0.2,
+            model_name="openai/gpt-4o",
+            base_url="https://openrouter.ai/api/v1",
+            openai_api_key=OPENROUTER_API_KEY,
+            max_tokens=2000,
+        )
 
 def clean_address_mistral(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace("  ", " ").strip()
@@ -187,72 +180,41 @@ Text:
     result = LLMChain(llm=get_llm(model_choice), prompt=prompt).invoke({"text": text})
     raw_output = result["text"].strip()
     try:
-        fields = json.loads(raw_output)
+        json_match = re.search(r"\{[\s\S]+\}", raw_output)
+        fields = json.loads(json_match.group()) if json_match else {}
         if "address" in fields and fields["address"] != "Not provided":
             fields["address"] = clean_address_mistral(fields["address"], original_text=text)
         return fields
     except Exception:
-        json_match = re.search(r"\{[\s\S]+\}", raw_output)
-        try:
-            fields = json.loads(json_match.group()) if json_match else {
-                "document_type": "Not provided",
-                "document_number": "Not provided",
-                "country_of_issue": "Not provided",
-                "issuing_authority": "Not provided",
-                "full_name": "Not provided",
-                "first_name": "Not provided",
-                "middle_name": "Not provided",
-                "last_name": "Not provided",
-                "gender": "Not provided",
-                "date_of_birth": "Not provided",
-                "place_of_birth": "Not provided",
-                "nationality": "Not provided",
-                "address": "Not provided",
-                "date_of_issue": "Not provided",
-                "date_of_expiry": "Not provided",
-                "blood_group": "Not provided",
-                "personal_id_number": "Not provided",
-                "father_name": "Not provided",
-                "mother_name": "Not provided",
-                "marital_status": "Not provided",
-                "photo_base64": "Not provided",
-                "signature_base64": "Not provided",
-                "additional_info": "Not provided",
-                "error": "No JSON block found",
-                "raw_output": raw_output
-            }
-            if "address" in fields and fields["address"] != "Not provided":
-                fields["address"] = clean_address_mistral(fields["address"], original_text=text)
-            return fields
-        except Exception:
-            return {
-                "document_type": "Not provided",
-                "document_number": "Not provided",
-                "country_of_issue": "Not provided",
-                "issuing_authority": "Not provided",
-                "full_name": "Not provided",
-                "first_name": "Not provided",
-                "middle_name": "Not provided",
-                "last_name": "Not provided",
-                "gender": "Not provided",
-                "date_of_birth": "Not provided",
-                "place_of_birth": "Not provided",
-                "nationality": "Not provided",
-                "address": "Not provided",
-                "date_of_issue": "Not provided",
-                "date_of_expiry": "Not provided",
-                "blood_group": "Not provided",
-                "personal_id_number": "Not provided",
-                "father_name": "Not provided",
-                "mother_name": "Not provided",
-                "marital_status": "Not provided",
-                "photo_base64": "Not provided",
-                "signature_base64": "Not provided",
-                "additional_info": "Not provided",
-                "error": "Failed to parse KYC fields",
-                "raw_output": raw_output
-            }
+        return {
+            "document_type": "Not provided",
+            "document_number": "Not provided",
+            "country_of_issue": "Not provided",
+            "issuing_authority": "Not provided",
+            "full_name": "Not provided",
+            "first_name": "Not provided",
+            "middle_name": "Not provided",
+            "last_name": "Not provided",
+            "gender": "Not provided",
+            "date_of_birth": "Not provided",
+            "place_of_birth": "Not provided",
+            "nationality": "Not provided",
+            "address": "Not provided",
+            "date_of_issue": "Not provided",
+            "date_of_expiry": "Not provided",
+            "blood_group": "Not provided",
+            "personal_id_number": "Not provided",
+            "father_name": "Not provided",
+            "mother_name": "Not provided",
+            "marital_status": "Not provided",
+            "photo_base64": "Not provided",
+            "signature_base64": "Not provided",
+            "additional_info": "Not provided",
+            "error": "Failed to parse KYC fields",
+            "raw_output": raw_output
+        }
 
+        
 def semantic_match(text1, text2, threshold=0.82):
     embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
     sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
