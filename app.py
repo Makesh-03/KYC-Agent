@@ -286,70 +286,121 @@ def verify_with_google_maps(address):
 
 # ── Table builder fixed using `dedent` to avoid markdown code-block rendering ──
 def format_verification_table(results):
+    """
+    Builds a clean, card-style verification table similar to the AP Agent sample.
+    Returns an HTML string (flush-left) ready for st.markdown(..., unsafe_allow_html=True).
+    """
     if not results:
         return ""
 
-    final_color = "#00ff7f" if results.get("final_result", False) else "#ff4d4d"
-    final_text = "Passed" if results.get("final_result", False) else "Failed"
+    final_ok = bool(results.get("final_result", False))
+    final_color = "#4CAF50" if final_ok else "#F44336"
+    final_bg = "rgba(76,175,80,0.08)" if final_ok else "rgba(244,67,54,0.08)"
+    final_text = "Verification Passed" if final_ok else "Verification Failed"
 
+    # Count documents based on existing extracted_address_* keys
     doc_count = len([k for k in results.keys() if k.startswith("extracted_address_")])
 
-    table_html = f"""
-<div style="background-color:#111; color:white; border:2px solid #a64dff; padding:16px; border-radius:12px; font-family:Arial, sans-serif; overflow-x:auto;">
-
-  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; border-bottom:1px solid #a64dff; padding-bottom:10px; margin-bottom:16px;">
-    <span style="font-weight:bold;">Final Result: <span style="color:{final_color};">{final_text}</span></span>
-    <span><strong>Address Consistency:</strong> {int(results.get("address_consistency_score", 0)*100)}%</span>
-    <span><strong>Name Consistency:</strong> {int(results.get("name_consistency_score", 0)*100)}%</span>
-    <span><strong>Overall Consistency:</strong> {int(results.get("document_consistency_score", 0)*100)}%</span>
-    <span><strong>Avg Authenticity:</strong> {int(results.get("average_authenticity_score", 0)*100)}%</span>
+    # --- Card header (status + key scores) ---
+    header_html = f"""
+<div style="background:#ffffff; border-radius:20px; box-shadow:0 2px 16px rgba(25,39,64,0.08); padding:22px 22px 18px 22px; margin-bottom:16px;">
+  <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+    <div style="border:2px solid {final_color}; background:{final_bg}; color:{final_color};
+                font-weight:800; padding:8px 14px; border-radius:12px; font-size:18px;">
+      {final_text}
+    </div>
+    <div style="color:#24345C; font-weight:600;">Address Consistency:
+      <span style="color:{final_color}; font-weight:800;">
+        {int(results.get("address_consistency_score", 0) * 100)}%
+      </span>
+    </div>
+    <div style="color:#24345C; font-weight:600;">Name Consistency:
+      <span style="color:{final_color}; font-weight:800;">
+        {int(results.get("name_consistency_score", 0) * 100)}%
+      </span>
+    </div>
+    <div style="color:#24345C; font-weight:600;">Overall Consistency:
+      <span style="color:{final_color}; font-weight:800;">
+        {int(results.get("document_consistency_score", 0) * 100)}%
+      </span>
+    </div>
+    <div style="color:#24345C; font-weight:600;">Avg Authenticity:
+      <span style="color:{final_color}; font-weight:800;">
+        {int(results.get("average_authenticity_score", 0) * 100)}%
+      </span>
+    </div>
   </div>
-
-  <table style="width:100%; min-width:600px; border-collapse:collapse; font-size:14px; table-layout:fixed;">
-    <thead>
-      <tr style="background-color:#222;">
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:5%;">Doc</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:25%;">Address</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:25%;">Full Name</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Similarity %</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Address Match</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Google Maps</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:15%;">Authenticity %</th>
-      </tr>
-    </thead>
-    <tbody>
+</div>
 """
+
+    # --- Table (styled like AP Agent sample) ---
+    table_head = """
+<table style="width:100%; border-collapse:collapse; background:#ffffff; border-radius:16px; overflow:hidden;
+             box-shadow:0 2px 16px rgba(25,39,64,0.06);">
+  <thead>
+    <tr style="background:#f7f7fa;">
+      <th style="text-align:left; padding:12px 14px; border-bottom:1px solid #ebeef5; width:6%;">Doc</th>
+      <th style="text-align:left; padding:12px 14px; border-bottom:1px solid #ebeef5; width:28%;">Address</th>
+      <th style="text-align:left; padding:12px 14px; border-bottom:1px solid #ebeef5; width:26%;">Full Name</th>
+      <th style="text-align:center; padding:12px 14px; border-bottom:1px solid #ebeef5; width:10%;">Similarity %</th>
+      <th style="text-align:center; padding:12px 14px; border-bottom:1px solid #ebeef5; width:10%;">Address Match</th>
+      <th style="text-align:center; padding:12px 14px; border-bottom:1px solid #ebeef5; width:10%;">Google Maps</th>
+      <th style="text-align:center; padding:12px 14px; border-bottom:1px solid #ebeef5; width:10%;">Authenticity %</th>
+    </tr>
+  </thead>
+  <tbody>
+"""
+
+    def pill(text, ok):
+        return f"""
+<span style="
+  display:inline-block; padding:4px 10px; border-radius:999px;
+  font-weight:700; font-size:12px;
+  color:{'#1B5E20' if ok else '#B71C1C'};
+  background:{'rgba(76,175,80,0.12)' if ok else 'rgba(244,67,54,0.12)'};
+  border:1px solid {'#C8E6C9' if ok else '#FFCDD2'};
+">
+  {text}
+</span>
+"""
+
+    rows_html = ""
     for idx in range(doc_count):
         address = results.get(f"extracted_address_{idx+1}", "Not provided")
         name = results.get(f"extracted_name_{idx+1}", "Not provided")
         sim_pct = int(round(results.get(f"similarity_to_expected_{idx+1}", 0) * 100))
-        match = results.get(f"address_match_{idx+1}", False)
-        maps_ok = results.get(f"google_maps_verified_{idx+1}", False)
+        match = bool(results.get(f"address_match_{idx+1}", False))
+        maps_ok = bool(results.get(f"google_maps_verified_{idx+1}", False))
         auth_pct = int(round(results.get(f"authenticity_score_{idx+1}", 0) * 100))
 
-        match_text = "Yes" if match else "No"
-        match_color = "#00ff7f" if match else "#ff4d4d"
-        maps_text = "Yes" if maps_ok else "No"
-        maps_color = "#00ff7f" if maps_ok else "#ff4d4d"
-
-        table_html += f"""
-      <tr>
-        <td style="padding:8px; border-bottom:1px solid #333; width:5%; text-align:center;">{idx+1}</td>
-        <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-all; overflow-wrap:break-word;">{address}</td>
-        <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-word;">{name}</td>
-        <td style="padding:8px; border-bottom:1px solid #333; width:10%; text-align:center;">{sim_pct}%</td>
-        <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{match_color}; font-weight:700; text-align:center;">{match_text}</td>
-        <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{maps_color}; font-weight:700; text-align:center;">{maps_text}</td>
-        <td style="padding:8px; border-bottom:1px solid #333; width:15%; text-align:center;">{auth_pct}%</td>
-      </tr>
+        rows_html += f"""
+    <tr>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; color:#24345C; font-weight:700;">{idx+1}</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; word-break:break-word; color:#324a6d;">{address}</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; word-break:break-word; color:#324a6d;">{name}</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; text-align:center; color:#24345C; font-weight:700;">{sim_pct}%</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; text-align:center;">{pill('Yes' if match else 'No', match)}</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; text-align:center;">{pill('Yes' if maps_ok else 'No', maps_ok)}</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; text-align:center; color:#24345C; font-weight:700;">{auth_pct}%</td>
+    </tr>
 """
-    table_html += """
-    </tbody>
-  </table>
+
+    table_html = table_head + rows_html + """
+  </tbody>
+</table>
+"""
+
+    # Wrap in a card container to match the AP Agent “block-card” feel
+    outer = f"""
+<div style="background:transparent;">
+  {header_html}
+  <div style="margin-top:12px;">
+    {table_html}
+  </div>
 </div>
 """
-    # ✅ Remove leading indentation so Markdown doesn't treat it as a code block
-    return dedent(table_html)
+    # Ensure no leading indentation to avoid code-block rendering in Markdown
+    return dedent(outer)
 
 def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
     if not files or len(files) < 2:
