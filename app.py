@@ -73,7 +73,7 @@ def extract_text_from_file(file):
 
 def get_llm(model_choice):
     model_map = {
-        "Mistral": "mistralai/Mistral-7B-Instruct-v0.2",
+        "Mistral": "mistralai/Mistral-7B-Instruct-v0.3",  # corrected
         "OpenAI": "openai/gpt-4o"
     }
     return ChatOpenAI(
@@ -399,62 +399,83 @@ def main():
     
     # Custom CSS
     st.markdown("""
-    <style>
-    .stApp {
-        background-color: #f5f5f5;
-    }
-    h1 {
-        font-size: 42px !important;
-        font-weight: 900 !important;
-        color: #333333;
-        text-align: center;
-        margin-bottom: 20px;
-    }
-    .purple-circle {
-        display: inline-flex;
-        justify-content: center;
-        align-items: center;
-        background-color: #a020f0 !important;
-        color: white;
-        border-radius: 50%;
-        width: 40px;
-        height: 40px;
-        font-size: 18px;
-        font-weight: bold;
-        margin-right: 10px;
-    }
-    .stFileUploader > div > div > div > label,
-    .stTextInput > div > div > label,
-    .stSelectbox > div > div > label,
-    .stSlider > div > div > label {
-        font-size: 18px !important;
-        font-weight: bold !important;
-        color: #333333;
-    }
-    .stButton > button {
-        background-color: #a020f0 !important;
-        color: white !important;
-        font-weight: bold !important;
-        font-size: 16px !important;
-        padding: 10px 22px !important;
-        border-radius: 8px !important;
-        border: none !important;
-    }
-    .stSlider > div > div > div > div {
-        background: #d3d3d3;
-        border-radius: 5px;
-    }
-    .stSlider > div > div > div > div > div {
-        background: #a020f0;
-        border-radius: 50%;
-    }
-    .stExpander {
-        border: 2px solid #a020f0;
-        border-radius: 8px;
-        padding: 10px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+<style>
+/* Overall dark background */
+.stApp {
+    background-color: #121212;
+    color: #ffffff;
+}
+
+/* Headers */
+h1 {
+    font-size: 42px !important;
+    font-weight: 900 !important;
+    color: #ffffff;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+/* Purple numbered circle */
+.purple-circle {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    background-color: #a020f0 !important;
+    color: white;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+/* Input labels */
+.stFileUploader > div > div > div > label,
+.stTextInput > div > div > label,
+.stSelectbox > div > div > label,
+.stSlider > div > div > label {
+    font-size: 18px !important;
+    font-weight: bold !important;
+    color: #ffffff !important;
+}
+
+/* Buttons */
+.stButton > button {
+    background-color: #a020f0 !important;
+    color: white !important;
+    font-weight: bold !important;
+    font-size: 16px !important;
+    padding: 10px 22px !important;
+    border-radius: 8px !important;
+    border: none !important;
+}
+
+/* Sliders */
+.stSlider > div > div > div > div {
+    background: #333333 !important;
+    border-radius: 5px;
+}
+.stSlider > div > div > div > div > div {
+    background: #a020f0 !important;
+    border-radius: 50%;
+}
+
+/* Expanders */
+.stExpander {
+    border: 2px solid #a020f0;
+    border-radius: 8px;
+    padding: 10px;
+    background-color: #1e1e1e;
+    color: #ffffff;
+}
+
+/* Markdown outputs inside app */
+.stMarkdown, .stText, .stCodeBlock {
+    color: #ffffff !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
     st.markdown("<h1>EZOFIS KYC Agent</h1>", unsafe_allow_html=True)
 
