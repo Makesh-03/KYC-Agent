@@ -7,7 +7,6 @@ import re
 import os
 import time
 import mimetypes
-from textwrap import dedent
 from sentence_transformers import SentenceTransformer, util
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
@@ -284,7 +283,7 @@ def verify_with_google_maps(address):
     except Exception:
         return False, address
 
-# ── Table builder fixed using `dedent` to avoid markdown code-block rendering ──
+# ── Fixed Table builder ──────────────────────────────────────────────────────
 def format_verification_table(results):
     if not results:
         return ""
@@ -294,31 +293,29 @@ def format_verification_table(results):
 
     doc_count = len([k for k in results.keys() if k.startswith("extracted_address_")])
 
-    table_html = f"""
-<div style="background-color:#111; color:white; border:2px solid #a64dff; padding:16px; border-radius:12px; font-family:Arial, sans-serif; overflow-x:auto;">
+    # Create a clean HTML table without extra indentation
+    table_html = f'''<div style="background-color:#111; color:white; border:2px solid #a64dff; padding:16px; border-radius:12px; font-family:Arial, sans-serif; overflow-x:auto;">
+<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; border-bottom:1px solid #a64dff; padding-bottom:10px; margin-bottom:16px;">
+<span style="font-weight:bold;">Final Result: <span style="color:{final_color};">{final_text}</span></span>
+<span><strong>Address Consistency:</strong> {int(results.get("address_consistency_score", 0)*100)}%</span>
+<span><strong>Name Consistency:</strong> {int(results.get("name_consistency_score", 0)*100)}%</span>
+<span><strong>Overall Consistency:</strong> {int(results.get("document_consistency_score", 0)*100)}%</span>
+<span><strong>Avg Authenticity:</strong> {int(results.get("average_authenticity_score", 0)*100)}%</span>
+</div>
+<table style="width:100%; min-width:600px; border-collapse:collapse; font-size:14px; table-layout:fixed;">
+<thead>
+<tr style="background-color:#222;">
+<th style="padding:10px; border-bottom:2px solid #a64dff; width:5%;">Doc</th>
+<th style="padding:10px; border-bottom:2px solid #a64dff; width:25%;">Address</th>
+<th style="padding:10px; border-bottom:2px solid #a64dff; width:25%;">Full Name</th>
+<th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Similarity %</th>
+<th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Address Match</th>
+<th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Google Maps</th>
+<th style="padding:10px; border-bottom:2px solid #a64dff; width:15%;">Authenticity %</th>
+</tr>
+</thead>
+<tbody>'''
 
-  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; border-bottom:1px solid #a64dff; padding-bottom:10px; margin-bottom:16px;">
-    <span style="font-weight:bold;">Final Result: <span style="color:{final_color};">{final_text}</span></span>
-    <span><strong>Address Consistency:</strong> {int(results.get("address_consistency_score", 0)*100)}%</span>
-    <span><strong>Name Consistency:</strong> {int(results.get("name_consistency_score", 0)*100)}%</span>
-    <span><strong>Overall Consistency:</strong> {int(results.get("document_consistency_score", 0)*100)}%</span>
-    <span><strong>Avg Authenticity:</strong> {int(results.get("average_authenticity_score", 0)*100)}%</span>
-  </div>
-
-  <table style="width:100%; min-width:600px; border-collapse:collapse; font-size:14px; table-layout:fixed;">
-    <thead>
-      <tr style="background-color:#222;">
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:5%;">Doc</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:25%;">Address</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:25%;">Full Name</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Similarity %</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Address Match</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:10%;">Google Maps</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff; width:15%;">Authenticity %</th>
-      </tr>
-    </thead>
-    <tbody>
-"""
     for idx in range(doc_count):
         address = results.get(f"extracted_address_{idx+1}", "Not provided")
         name = results.get(f"extracted_name_{idx+1}", "Not provided")
@@ -332,24 +329,21 @@ def format_verification_table(results):
         maps_text = "Yes" if maps_ok else "No"
         maps_color = "#00ff7f" if maps_ok else "#ff4d4d"
 
-        table_html += f"""
-      <tr>
-        <td style="padding:8px; border-bottom:1px solid #333; width:5%; text-align:center;">{idx+1}</td>
-        <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-all; overflow-wrap:break-word;">{address}</td>
-        <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-word;">{name}</td>
-        <td style="padding:8px; border-bottom:1px solid #333; width:10%; text-align:center;">{sim_pct}%</td>
-        <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{match_color}; font-weight:700; text-align:center;">{match_text}</td>
-        <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{maps_color}; font-weight:700; text-align:center;">{maps_text}</td>
-        <td style="padding:8px; border-bottom:1px solid #333; width:15%; text-align:center;">{auth_pct}%</td>
-      </tr>
-"""
-    table_html += """
-    </tbody>
-  </table>
-</div>
-"""
-    # ✅ Remove leading indentation so Markdown doesn't treat it as a code block
-    return dedent(table_html)
+        table_html += f'''<tr>
+<td style="padding:8px; border-bottom:1px solid #333; width:5%; text-align:center;">{idx+1}</td>
+<td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-all; overflow-wrap:break-word;">{address}</td>
+<td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-word;">{name}</td>
+<td style="padding:8px; border-bottom:1px solid #333; width:10%; text-align:center;">{sim_pct}%</td>
+<td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{match_color}; font-weight:700; text-align:center;">{match_text}</td>
+<td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{maps_color}; font-weight:700; text-align:center;">{maps_text}</td>
+<td style="padding:8px; border-bottom:1px solid #333; width:15%; text-align:center;">{auth_pct}%</td>
+</tr>'''
+
+    table_html += '''</tbody>
+</table>
+</div>'''
+    
+    return table_html
 
 def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
     if not files or len(files) < 2:
@@ -497,8 +491,8 @@ h1 { font-size: 42px !important; font-weight: 900 !important; color: #ffffff; te
                     file_inputs, expected_address, model_choice, consistency_threshold
                 )
                 status_placeholder.markdown(status, unsafe_allow_html=True)
-                # ✅ Ensure the table HTML is flush-left (no code block rendering)
-                output_placeholder.markdown(dedent(output_html), unsafe_allow_html=True)
+                # Fixed: Use the HTML directly without dedent
+                output_placeholder.markdown(output_html, unsafe_allow_html=True)
                 json_placeholder.json(document_info_json)
         else:
             st.error(
