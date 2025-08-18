@@ -237,10 +237,9 @@ def extract_kyc_fields(text, model_choice):
             }
 
 def semantic_match(text1, text2, threshold=0.82):
-    embeddings = similarity_model.encode([text1, text2], convert_to_tensor=True)
-    sim = util.pytorch_cos_sim(embeddings[0], embeddings[1])
-    return sim.item(), sim.item() >= threshold
-
+    embeddings = similarity_model.encode([text1, text2])
+    sim = util.cos_sim(embeddings[0], embeddings[1]).item()
+    return sim, sim >= threshold
 # ----- GOOGLE MAPS ADDRESS VALIDATION -----
 def verify_with_google_maps(address):
     if not GOOGLE_MAPS_API_KEY:
@@ -269,62 +268,33 @@ def format_verification_table(results):
     final_color = "#00ff7f" if results.get("final_result", False) else "#ff4d4d"
     final_text = "Passed" if results.get("final_result", False) else "Failed"
 
-    # Count documents based on extracted_address_* keys
     doc_count = len([k for k in results.keys() if k.startswith("extracted_address_")])
 
-    # Build compact table with only a few key fields
+    # Header
     table_html = f"""
     <div style="background-color:#111; color:white; border:2px solid #a64dff; padding:16px; border-radius:12px; font-family:Arial, sans-serif;">
 
-  <!-- Header Section -->
-  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; border-bottom:1px solid #a64dff; padding-bottom:10px; margin-bottom:16px;">
-    <span style="font-weight:bold;">Final Result: <span style="color:#00ff77;">Passed</span></span>
-    <span><strong>Address Consistency:</strong> 100%</span>
-    <span><strong>Name Consistency:</strong> 67%</span>
-    <span><strong>Overall Consistency:</strong> 100%</span>
-    <span><strong>Avg Authenticity:</strong> 85%</span>
-  </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; border-bottom:1px solid #a64dff; padding-bottom:10px; margin-bottom:16px;">
+        <span style="font-weight:bold;">Final Result: <span style="color:{final_color};">{final_text}</span></span>
+        <span><strong>Address Consistency:</strong> {int(results.get("address_consistency_score", 0)*100)}%</span>
+        <span><strong>Name Consistency:</strong> {int(results.get("name_consistency_score", 0)*100)}%</span>
+        <span><strong>Overall Consistency:</strong> {int(results.get("document_consistency_score", 0)*100)}%</span>
+        <span><strong>Avg Authenticity:</strong> {int(results.get("average_authenticity_score", 0)*100)}%</span>
+      </div>
 
-  <!-- Table -->
-  <table style="width:100%; border-collapse:collapse; font-size:14px;">
-    <thead>
-      <tr style="background-color:#222;">
-        <th style="padding:10px; border-bottom:2px solid #a64dff;">Doc</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff;">Address</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff;">Full Name</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff;">Similarity %</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff;">Address Match</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff;">Google Maps</th>
-        <th style="padding:10px; border-bottom:2px solid #a64dff;">Authenticity %</th>
-      </tr>
-    </thead>
-    <tbody>
-
-      <!-- Row 1 -->
-      <tr>
-        <td style="padding:8px; border-bottom:1px solid #333;">1</td>
-        <td style="padding:8px; border-bottom:1px solid #333; white-space:normal; word-break:break-word;">2 Thorburn Road, St John's, NL A1B 3L7</td>
-        <td style="padding:8px; border-bottom:1px solid #333; white-space:normal; word-break:break-word;">MANICKAM THAMARAI MAKESH KARTHIK</td>
-        <td style="padding:8px; border-bottom:1px solid #333;">99%</td>
-        <td style="padding:8px; border-bottom:1px solid #333; color:#00f7f7; font-weight:700;">Yes</td>
-        <td style="padding:8px; border-bottom:1px solid #333; color:#00f7f7; font-weight:700;">Yes</td>
-        <td style="padding:8px; border-bottom:1px solid #333;">85%</td>
-      </tr>
-
-      <!-- Row 2 -->
-      <tr>
-        <td style="padding:8px; border-bottom:1px solid #333;">2</td>
-        <td style="padding:8px; border-bottom:1px solid #333; white-space:normal; word-break:break-word;">2 Thorburn Road, St. John's, NL A1B 3L7</td>
-        <td style="padding:8px; border-bottom:1px solid #333; white-space:normal; word-break:break-word;">MAKESH THAMARAIKANNAN</td>
-        <td style="padding:8px; border-bottom:1px solid #333;">99%</td>
-        <td style="padding:8px; border-bottom:1px solid #333; color:#00f7f7; font-weight:700;">Yes</td>
-        <td style="padding:8px; border-bottom:1px solid #333; color:#00f7f7; font-weight:700;">Yes</td>
-        <td style="padding:8px; border-bottom:1px solid #333;">85%</td>
-      </tr>
-
-    </tbody>
-  </table>
-</div>
+      <table style="width:100%; border-collapse:collapse; font-size:14px;">
+        <thead>
+          <tr style="background-color:#222;">
+            <th style="padding:10px; border-bottom:2px solid #a64dff;">Doc</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff;">Address</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff;">Full Name</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff;">Similarity %</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff;">Address Match</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff;">Google Maps</th>
+            <th style="padding:10px; border-bottom:2px solid #a64dff;">Authenticity %</th>
+          </tr>
+        </thead>
+        <tbody>
     """
 
     for idx in range(doc_count):
@@ -341,15 +311,15 @@ def format_verification_table(results):
         maps_color = "#00ff7f" if maps_ok else "#ff4d4d"
 
         table_html += f"""
-          <tr>
-            <td style="padding:8px;border-bottom:1px solid #333;">{idx+1}</td>
-            <td style="padding:8px;border-bottom:1px solid #333;white-space:normal;word-break:break-word;">{address}</td>
-            <td style="padding:8px;border-bottom:1px solid #333;white-space:normal;word-break:break-word;">{name}</td>
-            <td style="padding:8px;border-bottom:1px solid #333;">{sim_pct}%</td>
-            <td style="padding:8px;border-bottom:1px solid #333;color:{match_color};font-weight:700;">{match_text}</td>
-            <td style="padding:8px;border-bottom:1px solid #333;color:{maps_color};font-weight:700;">{maps_text}</td>
-            <td style="padding:8px;border-bottom:1px solid #333;">{auth_pct}%</td>
-          </tr>
+        <tr>
+            <td style="padding:8px; border-bottom:1px solid #333;">{idx+1}</td>
+            <td style="padding:8px; border-bottom:1px solid #333; white-space:normal; word-break:break-word;">{address}</td>
+            <td style="padding:8px; border-bottom:1px solid #333; white-space:normal; word-break:break-word;">{name}</td>
+            <td style="padding:8px; border-bottom:1px solid #333;">{sim_pct}%</td>
+            <td style="padding:8px; border-bottom:1px solid #333; color:{match_color}; font-weight:700;">{match_text}</td>
+            <td style="padding:8px; border-bottom:1px solid #333; color:{maps_color}; font-weight:700;">{maps_text}</td>
+            <td style="padding:8px; border-bottom:1px solid #333;">{auth_pct}%</td>
+        </tr>
         """
 
     table_html += """
