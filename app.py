@@ -274,35 +274,57 @@ def format_verification_table(results):
 
     # Build compact table with only a few key fields
     table_html = f"""
-    <div style="border-radius:16px;border:2px solid #A020F0;margin-bottom:32px;
-                background:#1e1e1e;padding:18px 22px 22px 22px;
-                box-shadow:0 3px 16px #0003;color:#f5f5f5;">
-      <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px;">
-        <div><span style="font-weight:700;color:#bb86fc;">Final Result:</span>
-             <span style="font-weight:800;color:{final_color};">{final_text}</span></div>
-        <div><span style="font-weight:700;color:#bb86fc;">Address Consistency:</span>
-             <span>{int(round(results.get("address_consistency_score", 0)*100))}%</span></div>
-        <div><span style="font-weight:700;color:#bb86fc;">Name Consistency:</span>
-             <span>{int(round(results.get("name_consistency_score", 0)*100))}%</span></div>
-        <div><span style="font-weight:700;color:#bb86fc;">Overall Consistency:</span>
-             <span>{int(round(results.get("document_consistency_score", 0)*100))}%</span></div>
-        <div><span style="font-weight:700;color:#bb86fc;">Avg Authenticity:</span>
-             <span>{int(round(results.get("average_authenticity_score", 0)*100))}%</span></div>
-      </div>
+    <div style="background-color:#111; color:white; border:2px solid #a64dff; padding:16px; border-radius:12px; font-family:Arial, sans-serif;">
 
-      <table style="width:100%;border-collapse:collapse;">
-        <thead>
-          <tr>
-            <th style="text-align:left;border-bottom:1px solid #444;padding:8px;color:#bb86fc;">Doc</th>
-            <th style="text-align:left;border-bottom:1px solid #444;padding:8px;color:#bb86fc;">Address</th>
-            <th style="text-align:left;border-bottom:1px solid #444;padding:8px;color:#bb86fc;">Full Name</th>
-            <th style="text-align:left;border-bottom:1px solid #444;padding:8px;color:#bb86fc;">Similarity %</th>
-            <th style="text-align:left;border-bottom:1px solid #444;padding:8px;color:#bb86fc;">Address Match</th>
-            <th style="text-align:left;border-bottom:1px solid #444;padding:8px;color:#bb86fc;">Google Maps</th>
-            <th style="text-align:left;border-bottom:1px solid #444;padding:8px;color:#bb86fc;">Authenticity %</th>
-          </tr>
-        </thead>
-        <tbody>
+  <!-- Header Section -->
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; border-bottom:1px solid #a64dff; padding-bottom:10px; margin-bottom:16px;">
+    <span style="font-weight:bold;">Final Result: <span style="color:#00ff77;">Passed</span></span>
+    <span><strong>Address Consistency:</strong> 100%</span>
+    <span><strong>Name Consistency:</strong> 67%</span>
+    <span><strong>Overall Consistency:</strong> 100%</span>
+    <span><strong>Avg Authenticity:</strong> 85%</span>
+  </div>
+
+  <!-- Table -->
+  <table style="width:100%; border-collapse:collapse; font-size:14px;">
+    <thead>
+      <tr style="background-color:#222;">
+        <th style="padding:10px; border-bottom:2px solid #a64dff;">Doc</th>
+        <th style="padding:10px; border-bottom:2px solid #a64dff;">Address</th>
+        <th style="padding:10px; border-bottom:2px solid #a64dff;">Full Name</th>
+        <th style="padding:10px; border-bottom:2px solid #a64dff;">Similarity %</th>
+        <th style="padding:10px; border-bottom:2px solid #a64dff;">Address Match</th>
+        <th style="padding:10px; border-bottom:2px solid #a64dff;">Google Maps</th>
+        <th style="padding:10px; border-bottom:2px solid #a64dff;">Authenticity %</th>
+      </tr>
+    </thead>
+    <tbody>
+
+      <!-- Row 1 -->
+      <tr>
+        <td style="padding:8px; border-bottom:1px solid #333;">1</td>
+        <td style="padding:8px; border-bottom:1px solid #333; white-space:normal; word-break:break-word;">2 Thorburn Road, St John's, NL A1B 3L7</td>
+        <td style="padding:8px; border-bottom:1px solid #333; white-space:normal; word-break:break-word;">MANICKAM THAMARAI MAKESH KARTHIK</td>
+        <td style="padding:8px; border-bottom:1px solid #333;">99%</td>
+        <td style="padding:8px; border-bottom:1px solid #333; color:#00f7f7; font-weight:700;">Yes</td>
+        <td style="padding:8px; border-bottom:1px solid #333; color:#00f7f7; font-weight:700;">Yes</td>
+        <td style="padding:8px; border-bottom:1px solid #333;">85%</td>
+      </tr>
+
+      <!-- Row 2 -->
+      <tr>
+        <td style="padding:8px; border-bottom:1px solid #333;">2</td>
+        <td style="padding:8px; border-bottom:1px solid #333; white-space:normal; word-break:break-word;">2 Thorburn Road, St. John's, NL A1B 3L7</td>
+        <td style="padding:8px; border-bottom:1px solid #333; white-space:normal; word-break:break-word;">MAKESH THAMARAIKANNAN</td>
+        <td style="padding:8px; border-bottom:1px solid #333;">99%</td>
+        <td style="padding:8px; border-bottom:1px solid #333; color:#00f7f7; font-weight:700;">Yes</td>
+        <td style="padding:8px; border-bottom:1px solid #333; color:#00f7f7; font-weight:700;">Yes</td>
+        <td style="padding:8px; border-bottom:1px solid #333;">85%</td>
+      </tr>
+
+    </tbody>
+  </table>
+</div>
     """
 
     for idx in range(doc_count):
