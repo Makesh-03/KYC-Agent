@@ -11,7 +11,17 @@ import time
 import mimetypes
 
 # --- Config ---
-similarity_model = SentenceTransformer("all-MiniLM-L6-v2")
+try:
+    # Fix for meta tensor issue by forcing full download and setting device
+    similarity_model = SentenceTransformer(
+        "all-MiniLM-L6-v2",
+        device='cpu',
+        cache_folder="./.cache_sbert"  # ensures model weights are downloaded locally
+    )
+except Exception as e:
+    st.error(f"Failed to load SentenceTransformer model: {str(e)}")
+    st.stop()
+
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 UNSTRACT_API_KEY = os.getenv("UNSTRACT_API_KEY")
