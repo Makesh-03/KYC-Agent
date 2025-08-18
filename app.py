@@ -1,3 +1,5 @@
+# app.py
+
 import streamlit as st
 import requests
 import json
@@ -5,31 +7,42 @@ import re
 import os
 import time
 import mimetypes
-from sentence_transformers import SentenceTransformer , util
+from sentence_transformers import SentenceTransformer, util
 from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
-# --- Initialize embedding model only once per session ---
-if 'similarity_model' not in st.session_state:
-    with st.spinner("Loading embedding model..."):
-        try:
-            # Load the model without specifying device initially
-            st.session_state['similarity_model'] = SentenceTransformer(
-                "all-MiniLM-L6-v2",
-                cache_folder="./.cache_sbert"  # ensures model weights are downloaded locally
-            )
-            # Move the model to CPU explicitly after loading
-            st.session_state['similarity_model'].to('cpu')
-        except Exception as e:
-            st.error(f"Failed to load SentenceTransformer model: {str(e)}")
-            st.stop()
+# ── MUST be the first Streamlit call ───────────────────────────────────────────
+st.set_page_config(page_title="EZOFIS KYC Agent", page_icon="🔍", layout="wide")
+# ───────────────────────────────────────────────────────────────────────────────
 
 # --- Config ---
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
-UNSTRACT_API_KEY = os.getenv("UNSTRUCT_API_KEY")
-UNSTRUCT_BASE = "https://llmwhisperer-api.us-central.unstruct.com/api/v2"
+
+# Be forgiving about the env var name; prefer UNSTRUCT_API_KEY but accept UNSTRACT_API_KEY too
+UNSTRUCT_API_KEY = os.getenv("UNSTRUCT_API_KEY") or os.getenv("UNSTRACT_API_KEY")
+
+# Correct Unstract host
+UNSTRUCT_BASE = "https://llmwhisperer-api.us-central.unstract.com/api/v2"
+
+# Fail fast if OCR key is missing
+if not UNSTRUCT_API_KEY:
+    st.error("Missing UNSTRUCT_API_KEY environment variable (or UNSTRACT_API_KEY).")
+    st.stop()
+
+# --- Initialize embedding model only once per session ---
+if "similarity_model" not in st.session_state:
+    with st.spinner("Loading embedding model..."):
+        try:
+            st.session_state["similarity_model"] = SentenceTransformer(
+                "all-MiniLM-L6-v2",
+                cache_folder="./.cache_sbert",  # ensures model weights are downloaded locally
+            )
+            st.session_state["similarity_model"].to("cpu")
+        except Exception as e:
+            st.error(f"Failed to load SentenceTransformer model: {str(e)}")
+            st.stop()
 
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None", "Not provided"]}
@@ -38,44 +51,50 @@ def extract_text_from_file(file):
     filename = file.name
     file_bytes = file.read()
     headers = {
-        "unstruct-key": UNSTRUCT_API_KEY,
-        "Content-Type": mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        "x-api-key": UNSTRUCT_API_KEY,  # standard key header
+        "Content-Type": mimetypes.guess_type(filename)[0] or "application/octet-stream",
     }
-    up = requests.post(
-        f"{UNSTRUCT_BASE}/whisper",
-        headers=headers,
-        data=file_bytes,
-    )
+    up = requests.post(f"{UNSTRUCT_BASE}/whisper", headers=headers, data=file_bytes)
     if up.status_code not in (200, 202):
-        raise RuntimeError(f"OCR upload failed ({up.status_code})")
-    token = up.json()["whisper_hash"]
-    for poll_sec in range(180):
+        raise RuntimeError(f"OCR upload failed ({up.status_code}): {up.text}")
+
+    token = up.json().get("whisper_hash")
+    if not token:
+        raise RuntimeError(f"OCR response missing whisper_hash: {up.text}")
+
+    # Poll up to ~3 minutes
+    for _ in range(180):
         time.sleep(1)
         status_resp = requests.get(
-            f"{UNSTRUCT_BASE}/whisper-status?whisper_hash={token}",
-            headers={"unstruct-key": UNSTRUCT_API_KEY},
+            f"{UNSTRUCT_BASE}/whisper-status",
+            params={"whisper_hash": token},
+            headers={"x-api-key": UNSTRUCT_API_KEY},
         )
+        if status_resp.status_code != 200:
+            continue
         status_json = status_resp.json()
         status = status_json.get("status")
         if status == "processed":
             break
         elif status == "failed":
-            raise RuntimeError(f"Unstruct Whisperer processing failed: {status_json}")
+            raise RuntimeError(f"LLMWhisperer processing failed: {status_json}")
     else:
-        raise RuntimeError("Unstruct Whisperer API timeout waiting for job completion.")
+        raise RuntimeError("LLMWhisperer API timeout waiting for job completion.")
+
     ret = requests.get(
-        f"{UNSTRUCT_BASE}/whisper-retrieve?whisper_hash={token}&text_only=true",
-        headers={"unstruct-key": UNSTRUCT_API_KEY},
+        f"{UNSTRUCT_BASE}/whisper-retrieve",
+        params={"whisper_hash": token, "text_only": "true"},
+        headers={"x-api-key": UNSTRUCT_API_KEY},
     )
     try:
         return ret.json().get("result_text") or ret.text
-    except Exception as e:
+    except Exception:
         return ret.text
 
 def get_llm(model_choice):
     model_map = {
         "Mistral": "mistralai/Mistral-7B-Instruct-v0.3",
-        "OpenAI": "openai/gpt-4o"
+        "OpenAI": "openai/gpt-4o",
     }
     return ChatOpenAI(
         temperature=0.2,
@@ -178,33 +197,37 @@ def extract_kyc_fields(text, model_choice):
     except Exception:
         json_match = re.search(r"\{[\s\S]+\}", raw_output)
         try:
-            fields = json.loads(json_match.group()) if json_match else {
-                "document_type": "Not provided",
-                "document_number": "Not provided",
-                "country_of_issue": "Not provided",
-                "issuing_authority": "Not provided",
-                "full_name": "Not provided",
-                "first_name": "Not provided",
-                "middle_name": "Not provided",
-                "last_name": "Not provided",
-                "gender": "Not provided",
-                "date_of_birth": "Not provided",
-                "place_of_birth": "Not provided",
-                "nationality": "Not provided",
-                "address": "Not provided",
-                "date_of_issue": "Not provided",
-                "date_of_expiry": "Not provided",
-                "blood_group": "Not provided",
-                "personal_id_number": "Not provided",
-                "father_name": "Not provided",
-                "mother_name": "Not provided",
-                "marital_status": "Not provided",
-                "photo_base64": "Not provided",
-                "signature_base64": "Not provided",
-                "additional_info": "Not provided",
-                "error": "No JSON block found",
-                "raw_output": raw_output
-            }
+            fields = (
+                json.loads(json_match.group())
+                if json_match
+                else {
+                    "document_type": "Not provided",
+                    "document_number": "Not provided",
+                    "country_of_issue": "Not provided",
+                    "issuing_authority": "Not provided",
+                    "full_name": "Not provided",
+                    "first_name": "Not provided",
+                    "middle_name": "Not provided",
+                    "last_name": "Not provided",
+                    "gender": "Not provided",
+                    "date_of_birth": "Not provided",
+                    "place_of_birth": "Not provided",
+                    "nationality": "Not provided",
+                    "address": "Not provided",
+                    "date_of_issue": "Not provided",
+                    "date_of_expiry": "Not provided",
+                    "blood_group": "Not provided",
+                    "personal_id_number": "Not provided",
+                    "father_name": "Not provided",
+                    "mother_name": "Not provided",
+                    "marital_status": "Not provided",
+                    "photo_base64": "Not provided",
+                    "signature_base64": "Not provided",
+                    "additional_info": "Not provided",
+                    "error": "No JSON block found",
+                    "raw_output": raw_output,
+                }
+            )
             if "address" in fields and fields["address"] != "Not provided":
                 fields["address"] = clean_address_mistral(fields["address"], original_text=text)
             return fields
@@ -234,11 +257,11 @@ def extract_kyc_fields(text, model_choice):
                 "signature_base64": "Not provided",
                 "additional_info": "Not provided",
                 "error": "Failed to parse KYC fields",
-                "raw_output": raw_output
+                "raw_output": raw_output,
             }
 
 def semantic_match(text1, text2, threshold=0.82):
-    embeddings = st.session_state['similarity_model'].encode([text1, text2])
+    embeddings = st.session_state["similarity_model"].encode([text1, text2])
     sim = util.cos_sim(embeddings[0], embeddings[1]).item()
     return sim, sim >= threshold
 
@@ -313,7 +336,7 @@ def format_verification_table(results):
         <tr>
             <td style="padding:8px; border-bottom:1px solid #333; width:5%; text-align:center;">{idx+1}</td>
             <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-all; overflow-wrap:break-word;">{address}</td>
-            <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-all; overflow-wrap:break-word;">{name}</td>
+            <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-word;">{name}</td>
             <td style="padding:8px; border-bottom:1px solid #333; width:10%; text-align:center;">{sim_pct}%</td>
             <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{match_color}; font-weight:700; text-align:center;">{match_text}</td>
             <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{maps_color}; font-weight:700; text-align:center;">{maps_text}</td>
@@ -342,23 +365,29 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
             address = extract_address_with_llm(text, model_choice)
             fields = extract_kyc_fields(text, model_choice)
             name = fields.get("full_name", "Not provided")
+
             sim, match = semantic_match(address, expected_address)
             verified, google_maps_address = verify_with_google_maps(address)
             auth_score, _ = semantic_match(address, google_maps_address)
+
             authenticity_scores.append(auth_score)
             addresses.append(address)
             names.append(name)
+
             results[f"extracted_address_{idx+1}"] = address
             results[f"extracted_name_{idx+1}"] = name
             results[f"similarity_to_expected_{idx+1}"] = round(sim, 3)
             results[f"address_match_{idx+1}"] = match
             results[f"google_maps_verified_{idx+1}"] = verified
             results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
+
             kyc_fields[f"document_{idx+1}"] = filter_non_null_fields(fields)
+
         address_consistency_score, address_consistent = semantic_match(
             addresses[0], addresses[1], threshold=consistency_threshold
         )
         avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
+
         results["address_consistency_score"] = round(address_consistency_score, 3)
         results["name_consistency_score"] = (
             semantic_match(names[0], names[1])[0]
@@ -368,14 +397,22 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         results["document_consistency_score"] = round(address_consistency_score, 3)
         results["documents_consistent"] = address_consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
-        results["final_result"] = all([
-            results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"]
-            for i in range(len(files))
-        ]) and (address_consistency_score >= consistency_threshold)
+        results["final_result"] = all(
+            [results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"] for i in range(len(files))]
+        ) and (address_consistency_score >= consistency_threshold)
+
         status = (
-            f"✅ <b style='color:green;'>Verification Passed</b><br>Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
+            f"✅ <b style='color:green;'>Verification Passed</b><br>"
+            f"Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>"
+            f"Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>"
+            f"Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>"
+            f"Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
             if results["final_result"]
-            else f"❌ <b style='color:red;'>Verification Failed</b><br>Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
+            else f"❌ <b style='color:red;'>Verification Failed</b><br>"
+                 f"Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>"
+                 f"Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>"
+                 f"Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>"
+                 f"Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
         return status, format_verification_table(results), kyc_fields
     except Exception as e:
@@ -383,9 +420,8 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
 
 # --- Streamlit UI ---
 def main():
-    st.set_page_config(page_title="EZOFIS KYC Agent", page_icon="🔍", layout="wide")
-    
-    st.markdown("""
+    st.markdown(
+        """
 <style>
 /* Overall dark background */
 .stApp {
@@ -462,7 +498,9 @@ h1 {
     color: #ffffff !important;
 }
 </style>
-""", unsafe_allow_html=True)
+""",
+        unsafe_allow_html=True,
+    )
 
     st.markdown("<h1>EZOFIS KYC Agent</h1>", unsafe_allow_html=True)
 
@@ -470,15 +508,17 @@ h1 {
 
     with col1:
         st.markdown("<span class='purple-circle'>1</span> **Upload Documents (2 or more)**", unsafe_allow_html=True)
-        file_inputs = st.file_uploader("Documents", accept_multiple_files=True, type=["pdf", "png", "jpg", "jpeg"])
+        file_inputs = st.file_uploader(
+            "Documents", accept_multiple_files=True, type=["pdf", "png", "jpg", "jpeg"]
+        )
 
     with col2:
         st.markdown("<span class='purple-circle'>2</span> **Enter Expected Address**", unsafe_allow_html=True)
         expected_address = st.text_input("Expected Address", placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2")
-        
+
         st.markdown("<span class='purple-circle'>3</span> **Select LLM Provider**", unsafe_allow_html=True)
         model_choice = st.selectbox("LLM Provider", ["Mistral", "OpenAI"], index=0)
-        
+
         st.markdown("<span class='purple-circle'>4</span> **Set Consistency Threshold**", unsafe_allow_html=True)
         consistency_threshold = st.slider("Consistency Threshold", min_value=0.5, max_value=1.0, value=0.82, step=0.01)
 
@@ -503,7 +543,9 @@ h1 {
                 output_placeholder.markdown(output_html, unsafe_allow_html=True)
                 json_placeholder.json(document_info_json)
         else:
-            st.error("Please provide all required inputs: at least two documents, expected address, LLM provider, and consistency threshold.")
+            st.error(
+                "Please provide all required inputs: at least two documents, expected address, LLM provider, and consistency threshold."
+            )
 
 if __name__ == "__main__":
     main()
