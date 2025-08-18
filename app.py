@@ -9,15 +9,19 @@ from langchain.chains import LLMChain
 from langchain.chat_models import ChatOpenAI
 import time
 import mimetypes
+import torch
 
 # --- Config ---
 try:
-    # Fix for meta tensor issue by forcing full download and setting device
+    # Fix for meta tensor issue by loading model explicitly on CPU
     similarity_model = SentenceTransformer(
         "all-MiniLM-L6-v2",
         device='cpu',
-        cache_folder="./.cache_sbert"  # ensures model weights are downloaded locally
+        cache_folder="./.cache_sbert"
     )
+    # Force model parameters to CPU
+    for param in similarity_model.parameters():
+        param.data = param.data.to(torch.device("cpu"))
 except Exception as e:
     st.error(f"Failed to load SentenceTransformer model: {str(e)}")
     st.stop()
@@ -27,11 +31,11 @@ GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 UNSTRACT_API_KEY = os.getenv("UNSTRACT_API_KEY")
 UNSTRACT_BASE = "https://llmwhisperer-api.us-central.unstract.com/api/v2"
 
+# --- The rest of your code stays exactly the same ---
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None", "Not provided"]}
 
 def extract_text_from_file(file):
-    # Use Unstract Whisperer API (with API key) for PDF and images
     filename = file.name
     file_bytes = file.read()
     headers = {
@@ -46,7 +50,6 @@ def extract_text_from_file(file):
     if up.status_code not in (200, 202):
         raise RuntimeError(f"OCR upload failed ({up.status_code})")
     token = up.json()["whisper_hash"]
-    # Poll /whisper-status up to 3 min
     for poll_sec in range(180):
         time.sleep(1)
         status_resp = requests.get(
@@ -61,7 +64,6 @@ def extract_text_from_file(file):
             raise RuntimeError(f"Unstract Whisperer processing failed: {status_json}")
     else:
         raise RuntimeError("Unstract Whisperer API timeout waiting for job completion.")
-    # GET /whisper-retrieve
     ret = requests.get(
         f"{UNSTRACT_BASE}/whisper-retrieve?whisper_hash={token}&text_only=true",
         headers={"unstract-key": UNSTRACT_API_KEY},
@@ -73,7 +75,7 @@ def extract_text_from_file(file):
 
 def get_llm(model_choice):
     model_map = {
-        "Mistral": "mistralai/Mistral-7B-Instruct-v0.3",  # corrected
+        "Mistral": "mistralai/Mistral-7B-Instruct-v0.3",
         "OpenAI": "openai/gpt-4o"
     }
     return ChatOpenAI(
