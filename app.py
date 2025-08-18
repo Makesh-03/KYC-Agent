@@ -1,5 +1,3 @@
-# app.py
-
 import streamlit as st
 import requests
 import json
@@ -12,6 +10,7 @@ from sentence_transformers import SentenceTransformer, util
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 from langchain_community.chat_models import ChatOpenAI
+import streamlit.components.v1 as components # <-- 1. IMPORTED COMPONENTS
 
 # ── MUST be the first Streamlit call ───────────────────────────────────────────
 st.set_page_config(page_title="EZOFIS KYC Agent", page_icon="🔍", layout="wide")
@@ -534,26 +533,36 @@ h1 { font-size: 42px !important; font-weight: 900 !important; color: #ffffff; te
 
     st.markdown("<span class='purple-circle'>5</span> <b>KYC Verification Status</b>", unsafe_allow_html=True)
     status_placeholder = st.empty()
-
-    st.markdown("<span class='purple-circle'>6</span> <b>KYC Verification Details</b>", unsafe_allow_html=True)
-    with st.expander("View Full Verification Details", expanded=False):
-        output_placeholder = st.empty()
-        st.markdown("### Extracted Document Details")
-        json_placeholder = st.json({})
+    
+    # This container will hold the results table and JSON data
+    results_container = st.container()
 
     if verify_btn:
-        if file_inputs and expected_address and model_choice and consistency_threshold:
-            with st.spinner("Verifying..."):
+        if file_inputs and len(file_inputs) >= 2 and expected_address and model_choice and consistency_threshold:
+            with st.spinner("Verifying... This may take a moment."):
                 status, output_html, document_info_json = kyc_multi_verify(
                     file_inputs, expected_address, model_choice, consistency_threshold
                 )
                 status_placeholder.markdown(status, unsafe_allow_html=True)
-                # ✅ Ensure the table HTML is flush-left (no code block rendering)
-                output_placeholder.markdown(dedent(output_html), unsafe_allow_html=True)
-                json_placeholder.json(document_info_json)
+
+                # Use the results_container to display the output
+                with results_container:
+                    st.markdown("<span class='purple-circle'>6</span> <b>KYC Verification Details</b>", unsafe_allow_html=True)
+                    with st.expander("View Full Verification Details", expanded=True): # <-- 3. EXPANDED BY DEFAULT
+                        
+                        # <-- 2. USE COMPONENTS.HTML FOR THE TABLE
+                        # This bypasses the markdown parser, rendering the HTML directly and correctly.
+                        # The height parameter helps contain the table within a scrollable view if it gets long.
+                        if output_html:
+                            components.html(output_html, height=500, scrolling=True)
+                        else:
+                            st.info("No verification details to display.")
+                        
+                        st.markdown("### Extracted Document Details (JSON)")
+                        st.json(document_info_json)
         else:
             st.error(
-                "Please provide all required inputs: at least two documents, expected address, LLM provider, and consistency threshold."
+                "Please provide all required inputs: at least two documents, expected address, and an LLM provider."
             )
 
 if __name__ == "__main__":
