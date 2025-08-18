@@ -14,6 +14,15 @@ langchain-community
 langchain-huggingface
 openai
 PyMuPDF
+deepface
+opencv-python-headless
+pillow
+numpy>=2.0.0,<2.3.0
+tensorflow
+keras
+mtcnn
+retina-face
+tf-keras
 
 
 # Note: The error is not related to missing packages.
