@@ -1,4 +1,4 @@
-gradio
+streamlit
 sentence-transformers
 torch
 unstructured[local-inference]
@@ -10,10 +10,11 @@ unstructured-inference
 pdf2image
 pytesseract
 langchain
-langchain-huggingface
 langchain-community
+langchain-huggingface
 openai
 PyMuPDF
+
 
 # Note: The error is not related to missing packages.
 # It is due to an invalid model ID in your code or API call.

@@ -1,70 +1,71 @@
-import os
-import re
-import json
-import requests
 import streamlit as st
-from sentence_transformers import SentenceTransformer, util
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
-from langchain.chat_models import ChatOpenAI
+import requests
+import json
+import re
+import os
 import time
 import mimetypes
+from sentence_transformers import SentenceTransformer , util
+from langchain_community.chat_models import ChatOpenAI
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
+
+# --- Initialize embedding model only once per session ---
+if 'similarity_model' not in st.session_state:
+    with st.spinner("Loading embedding model..."):
+        try:
+            # Load the model without specifying device initially
+            st.session_state['similarity_model'] = SentenceTransformer(
+                "all-MiniLM-L6-v2",
+                cache_folder="./.cache_sbert"  # ensures model weights are downloaded locally
+            )
+            # Move the model to CPU explicitly after loading
+            st.session_state['similarity_model'].to('cpu')
+        except Exception as e:
+            st.error(f"Failed to load SentenceTransformer model: {str(e)}")
+            st.stop()
 
 # --- Config ---
-try:
-    # Fix for meta tensor issue by forcing full download and setting device
-    similarity_model = SentenceTransformer(
-        "all-MiniLM-L6-v2",
-        device='cpu',
-        cache_folder="./.cache_sbert"  # ensures model weights are downloaded locally
-    )
-except Exception as e:
-    st.error(f"Failed to load SentenceTransformer model: {str(e)}")
-    st.stop()
-
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
-UNSTRACT_API_KEY = os.getenv("UNSTRACT_API_KEY")
-UNSTRACT_BASE = "https://llmwhisperer-api.us-central.unstract.com/api/v2"
+UNSTRACT_API_KEY = os.getenv("UNSTRUCT_API_KEY")
+UNSTRUCT_BASE = "https://llmwhisperer-api.us-central.unstruct.com/api/v2"
 
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None", "Not provided"]}
 
 def extract_text_from_file(file):
-    # Use Unstract Whisperer API (with API key) for PDF and images
     filename = file.name
     file_bytes = file.read()
     headers = {
-        "unstract-key": UNSTRACT_API_KEY,
+        "unstruct-key": UNSTRUCT_API_KEY,
         "Content-Type": mimetypes.guess_type(filename)[0] or "application/octet-stream"
     }
     up = requests.post(
-        f"{UNSTRACT_BASE}/whisper",
+        f"{UNSTRUCT_BASE}/whisper",
         headers=headers,
         data=file_bytes,
     )
     if up.status_code not in (200, 202):
         raise RuntimeError(f"OCR upload failed ({up.status_code})")
     token = up.json()["whisper_hash"]
-    # Poll /whisper-status up to 3 min
     for poll_sec in range(180):
         time.sleep(1)
         status_resp = requests.get(
-            f"{UNSTRACT_BASE}/whisper-status?whisper_hash={token}",
-            headers={"unstract-key": UNSTRACT_API_KEY},
+            f"{UNSTRUCT_BASE}/whisper-status?whisper_hash={token}",
+            headers={"unstruct-key": UNSTRUCT_API_KEY},
         )
         status_json = status_resp.json()
         status = status_json.get("status")
         if status == "processed":
             break
         elif status == "failed":
-            raise RuntimeError(f"Unstract Whisperer processing failed: {status_json}")
+            raise RuntimeError(f"Unstruct Whisperer processing failed: {status_json}")
     else:
-        raise RuntimeError("Unstract Whisperer API timeout waiting for job completion.")
-    # GET /whisper-retrieve
+        raise RuntimeError("Unstruct Whisperer API timeout waiting for job completion.")
     ret = requests.get(
-        f"{UNSTRACT_BASE}/whisper-retrieve?whisper_hash={token}&text_only=true",
-        headers={"unstract-key": UNSTRACT_API_KEY},
+        f"{UNSTRUCT_BASE}/whisper-retrieve?whisper_hash={token}&text_only=true",
+        headers={"unstruct-key": UNSTRUCT_API_KEY},
     )
     try:
         return ret.json().get("result_text") or ret.text
@@ -73,7 +74,7 @@ def extract_text_from_file(file):
 
 def get_llm(model_choice):
     model_map = {
-        "Mistral": "mistralai/Mistral-7B-Instruct-v0.3",  # corrected
+        "Mistral": "mistralai/Mistral-7B-Instruct-v0.3",
         "OpenAI": "openai/gpt-4o"
     }
     return ChatOpenAI(
@@ -237,17 +238,17 @@ def extract_kyc_fields(text, model_choice):
             }
 
 def semantic_match(text1, text2, threshold=0.82):
-    embeddings = similarity_model.encode([text1, text2])
+    embeddings = st.session_state['similarity_model'].encode([text1, text2])
     sim = util.cos_sim(embeddings[0], embeddings[1]).item()
     return sim, sim >= threshold
-# ----- GOOGLE MAPS ADDRESS VALIDATION -----
+
 def verify_with_google_maps(address):
     if not GOOGLE_MAPS_API_KEY:
         return False, "No API key provided"
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {
         "address": address,
-        "region": "ca",  # restricts results to Canada
+        "region": "ca",
         "key": GOOGLE_MAPS_API_KEY,
     }
     response = requests.get(url, params=params)
@@ -260,7 +261,6 @@ def verify_with_google_maps(address):
     except Exception:
         return False, address
 
-# --- Format verification results as HTML table ---
 def format_verification_table(results):
     if not results:
         return ""
@@ -270,7 +270,6 @@ def format_verification_table(results):
 
     doc_count = len([k for k in results.keys() if k.startswith("extracted_address_")])
 
-    # Header
     table_html = f"""
     <div style="background-color:#111; color:white; border:2px solid #a64dff; padding:16px; border-radius:12px; font-family:Arial, sans-serif; overflow-x:auto;">
 
@@ -386,7 +385,6 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
 def main():
     st.set_page_config(page_title="EZOFIS KYC Agent", page_icon="🔍", layout="wide")
     
-    # Custom CSS
     st.markdown("""
 <style>
 /* Overall dark background */
