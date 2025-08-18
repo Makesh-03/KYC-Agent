@@ -8,9 +8,9 @@ import os
 import time
 import mimetypes
 from sentence_transformers import SentenceTransformer, util
-from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
+from langchain_community.chat_models import ChatOpenAI  # keep if this is what your env uses
 
 # ── MUST be the first Streamlit call ───────────────────────────────────────────
 st.set_page_config(page_title="EZOFIS KYC Agent", page_icon="🔍", layout="wide")
@@ -20,16 +20,9 @@ st.set_page_config(page_title="EZOFIS KYC Agent", page_icon="🔍", layout="wide
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 
-# Be forgiving about the env var name; prefer UNSTRUCT_API_KEY but accept UNSTRACT_API_KEY too
-UNSTRACT_API_KEY = os.getenv("UNSTRACT_API_KEY") or os.getenv("UNSTRACT_API_KEY")
-
-# Correct Unstract host
+# EXACTLY as in your Gradio reference
+UNSTRACT_API_KEY = os.getenv("UNSTRACT_API_KEY")
 UNSTRACT_BASE = "https://llmwhisperer-api.us-central.unstract.com/api/v2"
-
-# Fail fast if OCR key is missing
-if not UNSTRACT_API_KEY:
-    st.error("Missing UNSTRACT_API_KEY environment variable (or UNSTRACT_API_KEY).")
-    st.stop()
 
 # --- Initialize embedding model only once per session ---
 if "similarity_model" not in st.session_state:
@@ -37,7 +30,7 @@ if "similarity_model" not in st.session_state:
         try:
             st.session_state["similarity_model"] = SentenceTransformer(
                 "all-MiniLM-L6-v2",
-                cache_folder="./.cache_sbert",  # ensures model weights are downloaded locally
+                cache_folder="./.cache_sbert",
             )
             st.session_state["similarity_model"].to("cpu")
         except Exception as e:
@@ -47,13 +40,19 @@ if "similarity_model" not in st.session_state:
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None", "Not provided"]}
 
+# ── Unstract OCR: mirrors your Gradio reference (header + flow) ───────────────
 def extract_text_from_file(file):
     filename = file.name
     file_bytes = file.read()
+
+    if not UNSTRACT_API_KEY:
+        raise RuntimeError("Missing UNSTRACT_API_KEY environment variable.")
+
     headers = {
-        "x-api-key": UNSTRACT_API_KEY,  # standard key header
+        "unstract-key": UNSTRACT_API_KEY,
         "Content-Type": mimetypes.guess_type(filename)[0] or "application/octet-stream",
     }
+    # Upload
     up = requests.post(f"{UNSTRACT_BASE}/whisper", headers=headers, data=file_bytes)
     if up.status_code not in (200, 202):
         raise RuntimeError(f"OCR upload failed ({up.status_code}): {up.text}")
@@ -62,13 +61,12 @@ def extract_text_from_file(file):
     if not token:
         raise RuntimeError(f"OCR response missing whisper_hash: {up.text}")
 
-    # Poll up to ~3 minutes
+    # Poll /whisper-status up to ~3 minutes
     for _ in range(180):
         time.sleep(1)
         status_resp = requests.get(
-            f"{UNSTRACT_BASE}/whisper-status",
-            params={"whisper_hash": token},
-            headers={"x-api-key": UNSTRACT_API_KEY},
+            f"{UNSTRACT_BASE}/whisper-status?whisper_hash={token}",
+            headers={"unstract-key": UNSTRACT_API_KEY},
         )
         if status_resp.status_code != 200:
             continue
@@ -77,19 +75,20 @@ def extract_text_from_file(file):
         if status == "processed":
             break
         elif status == "failed":
-            raise RuntimeError(f"LLMWhisperer processing failed: {status_json}")
+            raise RuntimeError(f"Unstract Whisperer processing failed: {status_json}")
     else:
-        raise RuntimeError("LLMWhisperer API timeout waiting for job completion.")
+        raise RuntimeError("Unstract Whisperer API timeout waiting for job completion.")
 
+    # Retrieve
     ret = requests.get(
-        f"{UNSTRACT_BASE}/whisper-retrieve",
-        params={"whisper_hash": token, "text_only": "true"},
-        headers={"x-api-key": UNSTRACT_API_KEY},
+        f"{UNSTRACT_BASE}/whisper-retrieve?whisper_hash={token}&text_only=true",
+        headers={"unstract-key": UNSTRACT_API_KEY},
     )
     try:
         return ret.json().get("result_text") or ret.text
     except Exception:
         return ret.text
+# ───────────────────────────────────────────────────────────────────────────────
 
 def get_llm(model_choice):
     model_map = {
