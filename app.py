@@ -90,20 +90,16 @@ def extract_text_from_file(file):
         return ret.text
 # ───────────────────────────────────────────────────────────────────────────────
 
-def get_llm(model_choice):
-    model_map = {
-        "Mistral": "mistralai/Mistral-7B-Instruct-v0.3",
-        "OpenAI": "openai/gpt-4o",
-    }
+def get_llm():
     return ChatOpenAI(
         temperature=0.2,
-        model_name=model_map[model_choice],
+        model_name="openai/gpt-4o",
         base_url="https://openrouter.ai/api/v1",
         openai_api_key=OPENROUTER_API_KEY,
         max_tokens=2000,
     )
 
-def clean_address_mistral(raw_response, original_text=""):
+def clean_address(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace(" ", " ").strip()
     flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d)?[\.\):])\s*)+", "", flattened)
     flattened = re.sub(r"(?i)section\s*\d{1,2}(?:\.\d)?[\.\):]?\s*", "", flattened)
@@ -124,38 +120,18 @@ def clean_address_mistral(raw_response, original_text=""):
         return fallback.group(0).strip()
     return flattened
 
-def extract_address_with_llm(text, model_choice):
-    if model_choice == "Mistral":
-        template = (
-            "You are a strict document parser extracting Canadian addresses.\n\n"
-            "Your task is to extract ONLY the full Canadian mailing address from the document text. The address must include:\n"
-            "- A house or building number (must be a standalone number like '2', '742', '38A', NOT a prefixed section number like '8.' or '8)')\n"
-            "- Street name\n"
-            "- City or town\n"
-            "- Province (use two-letter code like ON, NL)\n"
-            "- Postal code (format: A1A 1A1)\n\n"
-            "**IMPORTANT RULES:**\n"
-            "- DO NOT include section numbers (e.g., '8.', '9., '8)', '9)') or labels like 'Eyes:', 'Class:', etc.\n"
-            "- Ignore any lines starting with numbers followed by a dot or parenthesis (e.g., '8.', '8.2', '9)') as these are section headers, not addresses."
-            "- The address should begin with the actual building number (e.g., '2 Thorburn Road')\n"
-            "- Never assume or hallucinate building numbers like '8.2' if the actual number is just '2'.\n"
-            "- If multiple addresses exist, pick the one that is clearly a Canadian residential or mailing address.\n\n"
-            "Return ONLY the address in one line. No extra words, explanations, or labels.\n\n"
-            "Example Output:\n742 Evergreen Terrace, Ottawa, ON K1A 0B1\n\n"
-            "Text:\n{document_text}\n\nExtracted Address:"
-        )
-    else:
-        template = (
-            "Extract the full Canadian mailing address from the following text. "
-            "Include street, city, province, and postal code.\n\n"
-            "Text: {document_text}\n\nAddress:"
-        )
+def extract_address_with_llm(text):
+    template = (
+        "Extract the full Canadian mailing address from the following text. "
+        "Include street, city, province, and postal code.\n\n"
+        "Text: {document_text}\n\nAddress:"
+    )
     prompt = PromptTemplate(template=template, input_variables=["document_text"])
-    chain = LLMChain(llm=get_llm(model_choice), prompt=prompt)
+    chain = LLMChain(llm=get_llm(), prompt=prompt)
     result = chain.invoke({"document_text": text})
-    return clean_address_mistral(result["text"].strip(), original_text=text)
+    return clean_address(result["text"].strip(), original_text=text)
 
-def extract_kyc_fields(text, model_choice):
+def extract_kyc_fields(text):
     template = """ 
     You are an expert KYC document parser. Extract only factual data from the document. If any field is missing, set it to "Not provided". DO NOT infer. The address must include building/house number, street, city, province, postal code. Return only the JSON below:
     {{ 
@@ -186,12 +162,12 @@ def extract_kyc_fields(text, model_choice):
     Text: {text}
     """
     prompt = PromptTemplate(template=template, input_variables=["text"], template_format="f-string")
-    result = LLMChain(llm=get_llm(model_choice), prompt=prompt).invoke({"text": text})
+    result = LLMChain(llm=get_llm(), prompt=prompt).invoke({"text": text})
     raw_output = result["text"].strip()
     try:
         fields = json.loads(raw_output)
         if "address" in fields and fields["address"] != "Not provided":
-            fields["address"] = clean_address_mistral(fields["address"], original_text=text)
+            fields["address"] = clean_address(fields["address"], original_text=text)
         return fields
     except Exception:
         json_match = re.search(r"\{[\s\S]+\}", raw_output)
@@ -228,7 +204,7 @@ def extract_kyc_fields(text, model_choice):
                 }
             )
             if "address" in fields and fields["address"] != "Not provided":
-                fields["address"] = clean_address_mistral(fields["address"], original_text=text)
+                fields["address"] = clean_address(fields["address"], original_text=text)
             return fields
         except Exception:
             return {
@@ -345,7 +321,7 @@ def format_verification_table(results):
     
     return table_html
 
-def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
+def kyc_multi_verify(files, expected_address, consistency_threshold):
     if not files or len(files) < 2:
         return "❌ Please upload at least two documents.", "", {}
 
@@ -358,8 +334,8 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
 
         for idx, file in enumerate(files):
             text = extract_text_from_file(file)
-            address = extract_address_with_llm(text, model_choice)
-            fields = extract_kyc_fields(text, model_choice)
+            address = extract_address_with_llm(text)
+            fields = extract_kyc_fields(text)
             name = fields.get("full_name", "Not provided")
 
             sim, match = semantic_match(address, expected_address)
@@ -472,28 +448,25 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
         st.markdown("<span class='purple-circle'>2</span> <b>Enter Expected Address</b>", unsafe_allow_html=True)
         expected_address = st.text_input("Expected Address", placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2")
 
-        st.markdown("<span class='purple-circle'>3</span> <b>Select LLM Provider</b>", unsafe_allow_html=True)
-        model_choice = st.selectbox("LLM Provider", ["Mistral", "OpenAI"], index=0)
-
-        st.markdown("<span class='purple-circle'>4</span> <b>Set Consistency Threshold</b>", unsafe_allow_html=True)
+        st.markdown("<span class='purple-circle'>3</span> <b>Set Consistency Threshold</b>", unsafe_allow_html=True)
         consistency_threshold = st.slider("Consistency Threshold", min_value=0.5, max_value=1.0, value=0.82, step=0.01)
 
     verify_btn = st.button("🔍 Verify Now")
 
-    st.markdown("<span class='purple-circle'>5</span> <b>KYC Verification Status</b>", unsafe_allow_html=True)
+    st.markdown("<span class='purple-circle'>4</span> <b>KYC Verification Status</b>", unsafe_allow_html=True)
     status_placeholder = st.empty()
 
-    st.markdown("<span class='purple-circle'>6</span> <b>KYC Verification Details</b>", unsafe_allow_html=True)
+    st.markdown("<span class='purple-circle'>5</span> <b>KYC Verification Details</b>", unsafe_allow_html=True)
     with st.expander("View Full Verification Details", expanded=False):
         output_placeholder = st.empty()
         st.markdown("### Extracted Document Details")
         json_placeholder = st.json({})
 
     if verify_btn:
-        if file_inputs and expected_address and model_choice and consistency_threshold:
+        if file_inputs and expected_address and consistency_threshold:
             with st.spinner("Verifying..."):
                 status, output_html, document_info_json = kyc_multi_verify(
-                    file_inputs, expected_address, model_choice, consistency_threshold
+                    file_inputs, expected_address, consistency_threshold
                 )
                 status_placeholder.markdown(status, unsafe_allow_html=True)
                 # Fixed: Use the HTML directly without dedent
@@ -501,8 +474,9 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                 json_placeholder.json(document_info_json)
         else:
             st.error(
-                "Please provide all required inputs: at least two documents, expected address, LLM provider, and consistency threshold."
+                "Please provide all required inputs: at least two documents, expected address, and consistency threshold."
             )
+
 
     # Face Verification Section - MOVED TO THE END
     st.markdown("<hr style='border: 1px solid #a020f0; margin: 30px 0;'>", unsafe_allow_html=True)
