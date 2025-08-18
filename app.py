@@ -21,14 +21,14 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 
 # Be forgiving about the env var name; prefer UNSTRUCT_API_KEY but accept UNSTRACT_API_KEY too
-UNSTRUCT_API_KEY = os.getenv("UNSTRUCT_API_KEY") or os.getenv("UNSTRACT_API_KEY")
+UNSTRACT_API_KEY = os.getenv("UNSTRACT_API_KEY") or os.getenv("UNSTRACT_API_KEY")
 
 # Correct Unstract host
-UNSTRUCT_BASE = "https://llmwhisperer-api.us-central.unstract.com/api/v2"
+UNSTRACT_BASE = "https://llmwhisperer-api.us-central.unstract.com/api/v2"
 
 # Fail fast if OCR key is missing
-if not UNSTRUCT_API_KEY:
-    st.error("Missing UNSTRUCT_API_KEY environment variable (or UNSTRACT_API_KEY).")
+if not UNSTRACT_API_KEY:
+    st.error("Missing UNSTRACT_API_KEY environment variable (or UNSTRACT_API_KEY).")
     st.stop()
 
 # --- Initialize embedding model only once per session ---
@@ -51,10 +51,10 @@ def extract_text_from_file(file):
     filename = file.name
     file_bytes = file.read()
     headers = {
-        "x-api-key": UNSTRUCT_API_KEY,  # standard key header
+        "x-api-key": UNSTRACT_API_KEY,  # standard key header
         "Content-Type": mimetypes.guess_type(filename)[0] or "application/octet-stream",
     }
-    up = requests.post(f"{UNSTRUCT_BASE}/whisper", headers=headers, data=file_bytes)
+    up = requests.post(f"{UNSTRACT_BASE}/whisper", headers=headers, data=file_bytes)
     if up.status_code not in (200, 202):
         raise RuntimeError(f"OCR upload failed ({up.status_code}): {up.text}")
 
@@ -66,9 +66,9 @@ def extract_text_from_file(file):
     for _ in range(180):
         time.sleep(1)
         status_resp = requests.get(
-            f"{UNSTRUCT_BASE}/whisper-status",
+            f"{UNSTRACT_BASE}/whisper-status",
             params={"whisper_hash": token},
-            headers={"x-api-key": UNSTRUCT_API_KEY},
+            headers={"x-api-key": UNSTRACT_API_KEY},
         )
         if status_resp.status_code != 200:
             continue
@@ -82,9 +82,9 @@ def extract_text_from_file(file):
         raise RuntimeError("LLMWhisperer API timeout waiting for job completion.")
 
     ret = requests.get(
-        f"{UNSTRUCT_BASE}/whisper-retrieve",
+        f"{UNSTRACT_BASE}/whisper-retrieve",
         params={"whisper_hash": token, "text_only": "true"},
-        headers={"x-api-key": UNSTRUCT_API_KEY},
+        headers={"x-api-key": UNSTRACT_API_KEY},
     )
     try:
         return ret.json().get("result_text") or ret.text
