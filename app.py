@@ -7,7 +7,6 @@ import re
 import os
 import time
 import mimetypes
-import html  # NEW: for safe HTML escaping
 from textwrap import dedent
 from sentence_transformers import SentenceTransformer, util
 from langchain.prompts import PromptTemplate
@@ -285,55 +284,48 @@ def verify_with_google_maps(address):
     except Exception:
         return False, address
 
-# ── Dark-themed, consistent verification table ────────────────────────────────
+# ── Table builder fixed using `dedent` to avoid markdown code-block rendering ──
 def format_verification_table(results):
     """
-    Dark-themed, consistent verification table.
-    - Uses results['doc_count'] for stable row count.
-    - Escapes text content to avoid broken HTML.
-    - Wraps long text cleanly.
+    Builds a clean, card-style verification table similar to the AP Agent sample.
+    Returns an HTML string (flush-left) ready for st.markdown(..., unsafe_allow_html=True).
     """
     if not results:
         return ""
 
-    def esc(x):
-        return html.escape(str(x if x is not None else ""))
-
     final_ok = bool(results.get("final_result", False))
     final_color = "#4CAF50" if final_ok else "#F44336"
-    final_bg = "rgba(76,175,80,0.12)" if final_ok else "rgba(244,67,54,0.12)"
+    final_bg = "rgba(76,175,80,0.08)" if final_ok else "rgba(244,67,54,0.08)"
     final_text = "Verification Passed" if final_ok else "Verification Failed"
 
-    # Prefer explicit doc_count to avoid missing rows
-    doc_count = int(results.get("doc_count", 0))
-    if doc_count <= 0:
-        doc_count = len([k for k in results.keys() if k.startswith("extracted_address_")])
+    # Count documents based on existing extracted_address_* keys
+    doc_count = len([k for k in results.keys() if k.startswith("extracted_address_")])
 
-    # --- Header (status + key scores), dark theme ---
+    # --- Card header (status + key scores) ---
     header_html = f"""
-<div style="background:#1b1b1b; border-radius:20px; box-shadow:0 2px 16px rgba(0,0,0,0.35); padding:22px; margin-bottom:16px; border:1px solid #2a2a2a;">
+<div style="background:#ffffff; border-radius:20px; box-shadow:0 2px 16px rgba(25,39,64,0.08); padding:22px 22px 18px 22px; margin-bottom:16px;">
   <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
     <div style="border:2px solid {final_color}; background:{final_bg}; color:{final_color};
                 font-weight:800; padding:8px 14px; border-radius:12px; font-size:18px;">
       {final_text}
     </div>
-    <div style="color:#eaeaea; font-weight:600;">Address Consistency:
+    <div style="color:#24345C; font-weight:600;">Address Consistency:
       <span style="color:{final_color}; font-weight:800;">
         {int(results.get("address_consistency_score", 0) * 100)}%
       </span>
     </div>
-    <div style="color:#eaeaea; font-weight:600;">Name Consistency:
+    <div style="color:#24345C; font-weight:600;">Name Consistency:
       <span style="color:{final_color}; font-weight:800;">
         {int(results.get("name_consistency_score", 0) * 100)}%
       </span>
     </div>
-    <div style="color:#eaeaea; font-weight:600;">Overall Consistency:
-      <span style="color:{final_color}; font-weight:800%;">
+    <div style="color:#24345C; font-weight:600;">Overall Consistency:
+      <span style="color:{final_color}; font-weight:800;">
         {int(results.get("document_consistency_score", 0) * 100)}%
       </span>
     </div>
-    <div style="color:#eaeaea; font-weight:600;">Avg Authenticity:
-      <span style="color:{final_color}; font-weight:800%;">
+    <div style="color:#24345C; font-weight:600;">Avg Authenticity:
+      <span style="color:{final_color}; font-weight:800;">
         {int(results.get("average_authenticity_score", 0) * 100)}%
       </span>
     </div>
@@ -341,28 +333,19 @@ def format_verification_table(results):
 </div>
 """
 
-    # --- Table (dark), with fixed widths + wrapping ---
+    # --- Table (styled like AP Agent sample) ---
     table_head = """
-<table style="width:100%; border-collapse:separate; border-spacing:0; background:#1b1b1b; border-radius:16px; overflow:hidden;
-             box-shadow:0 2px 16px rgba(0,0,0,0.35); border:1px solid #2a2a2a; color:#eaeaea; table-layout:fixed;">
-  <colgroup>
-    <col style="width:6%;">
-    <col style="width:28%;">
-    <col style="width:26%;">
-    <col style="width:10%;">
-    <col style="width:10%;">
-    <col style="width:10%;">
-    <col style="width:10%;">
-  </colgroup>
+<table style="width:100%; border-collapse:collapse; background:#ffffff; border-radius:16px; overflow:hidden;
+             box-shadow:0 2px 16px rgba(25,39,64,0.06);">
   <thead>
-    <tr style="background:#161616;">
-      <th style="text-align:left; padding:12px 14px; border-bottom:1px solid #2a2a2a;">Doc</th>
-      <th style="text-align:left; padding:12px 14px; border-bottom:1px solid #2a2a2a;">Address</th>
-      <th style="text-align:left; padding:12px 14px; border-bottom:1px solid #2a2a2a;">Full Name</th>
-      <th style="text-align:center; padding:12px 14px; border-bottom:1px solid #2a2a2a;">Similarity %</th>
-      <th style="text-align:center; padding:12px 14px; border-bottom:1px solid #2a2a2a;">Address Match</th>
-      <th style="text-align:center; padding:12px 14px; border-bottom:1px solid #2a2a2a;">Google Maps</th>
-      <th style="text-align:center; padding:12px 14px; border-bottom:1px solid #2a2a2a;">Authenticity %</th>
+    <tr style="background:#f7f7fa;">
+      <th style="text-align:left; padding:12px 14px; border-bottom:1px solid #ebeef5; width:6%;">Doc</th>
+      <th style="text-align:left; padding:12px 14px; border-bottom:1px solid #ebeef5; width:28%;">Address</th>
+      <th style="text-align:left; padding:12px 14px; border-bottom:1px solid #ebeef5; width:26%;">Full Name</th>
+      <th style="text-align:center; padding:12px 14px; border-bottom:1px solid #ebeef5; width:10%;">Similarity %</th>
+      <th style="text-align:center; padding:12px 14px; border-bottom:1px solid #ebeef5; width:10%;">Address Match</th>
+      <th style="text-align:center; padding:12px 14px; border-bottom:1px solid #ebeef5; width:10%;">Google Maps</th>
+      <th style="text-align:center; padding:12px 14px; border-bottom:1px solid #ebeef5; width:10%;">Authenticity %</th>
     </tr>
   </thead>
   <tbody>
@@ -373,45 +356,32 @@ def format_verification_table(results):
 <span style="
   display:inline-block; padding:4px 10px; border-radius:999px;
   font-weight:700; font-size:12px;
-  color:{'#b7f7c2' if ok else '#ffb3b3'};
-  background:{'rgba(76,175,80,0.18)' if ok else 'rgba(244,67,54,0.18)'};
-  border:1px solid {'#2f7840' if ok else '#7a2f2f'};
+  color:{'#1B5E20' if ok else '#B71C1C'};
+  background:{'rgba(76,175,80,0.12)' if ok else 'rgba(244,67,54,0.12)'};
+  border:1px solid {'#C8E6C9' if ok else '#FFCDD2'};
 ">
-  {html.escape(str(text))}
+  {text}
 </span>
 """
 
-    row_sep = "border-bottom:1px solid #2a2a2a;"
-    cell_common = "padding:10px 14px; " + row_sep + " word-wrap:break-word; overflow-wrap:anywhere; color:#eaeaea;"
-
     rows_html = ""
     for idx in range(doc_count):
-        addr_key = f"extracted_address_{idx+1}"
-        name_key = f"extracted_name_{idx+1}"
-        sim_key  = f"similarity_to_expected_{idx+1}"
-        match_key = f"address_match_{idx+1}"
-        maps_key = f"google_maps_verified_{idx+1}"
-        auth_key = f"authenticity_score_{idx+1}"
-
-        address = html.escape(results.get(addr_key, "Not provided"))
-        name = html.escape(results.get(name_key, "Not provided"))
-
-        # numeric fields default to 0
-        sim_pct = int(round(float(results.get(sim_key, 0) or 0) * 100))
-        auth_pct = int(round(float(results.get(auth_key, 0) or 0) * 100))
-
-        match = bool(results.get(match_key, False))
-        maps_ok = bool(results.get(maps_key, False))
+        address = results.get(f"extracted_address_{idx+1}", "Not provided")
+        name = results.get(f"extracted_name_{idx+1}", "Not provided")
+        sim_pct = int(round(results.get(f"similarity_to_expected_{idx+1}", 0) * 100))
+        match = bool(results.get(f"address_match_{idx+1}", False))
+        maps_ok = bool(results.get(f"google_maps_verified_{idx+1}", False))
+        auth_pct = int(round(results.get(f"authenticity_score_{idx+1}", 0) * 100))
 
         rows_html += f"""
     <tr>
-      <td style="{cell_common} font-weight:700; color:#ffffff;">{idx+1}</td>
-      <td style="{cell_common}">{address}</td>
-      <td style="{cell_common}">{name}</td>
-      <td style="{cell_common} text-align:center; font-weight:700;">{sim_pct}%</td>
-      <td style="{cell_common} text-align:center;">{pill('Yes' if match else 'No', match)}</td>
-      <td style="{cell_common} text-align:center;">{pill('Yes' if maps_ok else 'No', maps_ok)}</td>
-      <td style="{cell_common} text-align:center; font-weight:700;">{auth_pct}%</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; color:#24345C; font-weight:700;">{idx+1}</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; word-break:break-word; color:#324a6d;">{address}</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; word-break:break-word; color:#324a6d;">{name}</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; text-align:center; color:#24345C; font-weight:700;">{sim_pct}%</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; text-align:center;">{pill('Yes' if match else 'No', match)}</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; text-align:center;">{pill('Yes' if maps_ok else 'No', maps_ok)}</td>
+      <td style="padding:10px 14px; border-bottom:1px solid #f0f2f7; text-align:center; color:#24345C; font-weight:700;">{auth_pct}%</td>
     </tr>
 """
 
@@ -420,6 +390,7 @@ def format_verification_table(results):
 </table>
 """
 
+    # Wrap in a card container to match the AP Agent “block-card” feel
     outer = f"""
 <div style="background:transparent;">
   {header_html}
@@ -428,6 +399,7 @@ def format_verification_table(results):
   </div>
 </div>
 """
+    # Ensure no leading indentation to avoid code-block rendering in Markdown
     return dedent(outer)
 
 def kyc_multi_verify(files, expected_address, model_choice, consistency_threshold):
@@ -478,9 +450,6 @@ def kyc_multi_verify(files, expected_address, model_choice, consistency_threshol
         results["document_consistency_score"] = round(address_consistency_score, 3)
         results["documents_consistent"] = address_consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
-
-        # ✅ NEW: explicitly set number of rows to render (one per file)
-        results["doc_count"] = len(files)
 
         results["final_result"] = all(
             [results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"] for i in range(len(files))]
@@ -533,11 +502,6 @@ h1 { font-size: 42px !important; font-weight: 900 !important; color: #ffffff; te
 
 /* Expanders */
 .stExpander { border: 2px solid #a020f0; border-radius: 8px; padding: 10px; background-color: #1e1e1e; color: #ffffff; }
-/* NEW: Darken inner expander content */
-.stExpander .streamlit-expanderContent, .stExpander div[data-testid="stMarkdownContainer"] {
-  background-color: #1b1b1b !important;
-  color: #eaeaea !important;
-}
 
 /* Markdown outputs inside app */
 .stMarkdown, .stText, .stCodeBlock { color: #ffffff !important; }
