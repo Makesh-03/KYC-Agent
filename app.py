@@ -426,6 +426,7 @@ def main():
 
 /* Headers */
 h1 { font-size: 42px !important; font-weight: 900 !important; color: #ffffff; text-align: center; margin-bottom: 20px; }
+h3 { color: #a020f0 !important; font-weight: bold !important; }
 
 /* Purple numbered circle */
 .purple-circle { display: inline-flex; justify-content: center; align-items: center; background-color: #a020f0 !important; color: white; border-radius: 50%; width: 40px; height: 40px; font-size: 18px; font-weight: bold; margin-right: 10px; }
@@ -446,6 +447,9 @@ h1 { font-size: 42px !important; font-weight: 900 !important; color: #ffffff; te
 /* Expanders */
 .stExpander { border: 2px solid #a020f0; border-radius: 8px; padding: 10px; background-color: #1e1e1e; color: #ffffff; }
 
+/* Text areas */
+.stTextArea > div > div > textarea { background-color: #1e1e1e !important; color: #ffffff !important; border: 1px solid #a020f0 !important; }
+
 /* Markdown outputs inside app */
 .stMarkdown, .stText, .stCodeBlock { color: #ffffff !important; }
 </style>
@@ -455,6 +459,7 @@ h1 { font-size: 42px !important; font-weight: 900 !important; color: #ffffff; te
 
     st.markdown("<h1>EZOFIS KYC Agent</h1>", unsafe_allow_html=True)
 
+    # Main KYC Verification Section
     col1, col2 = st.columns(2)
 
     with col1:
@@ -498,6 +503,145 @@ h1 { font-size: 42px !important; font-weight: 900 !important; color: #ffffff; te
             st.error(
                 "Please provide all required inputs: at least two documents, expected address, LLM provider, and consistency threshold."
             )
+
+    # Face Verification Section - MOVED TO THE END
+    st.markdown("<hr style='border: 1px solid #a020f0; margin: 30px 0;'>", unsafe_allow_html=True)
+    st.markdown("<h3>🧑‍💼 Face Verification</h3>", unsafe_allow_html=True)
+    st.markdown("Compare faces from ID document and selfie image using advanced deep learning models.", unsafe_allow_html=True)
+
+    face_col1, face_col2 = st.columns(2)
+
+    with face_col1:
+        st.markdown("<span class='purple-circle'>7</span> <b>Upload ID/License Image</b>", unsafe_allow_html=True)
+        id_image = st.file_uploader("ID/License Image", type=["png", "jpg", "jpeg"], key="id_upload")
+
+    with face_col2:
+        st.markdown("<span class='purple-circle'>8</span> <b>Upload Selfie Image</b>", unsafe_allow_html=True)
+        selfie_image = st.file_uploader("Selfie Image", type=["png", "jpg", "jpeg"], key="selfie_upload")
+
+    face_verify_btn = st.button("🔍 Compare Faces")
+
+    st.markdown("<span class='purple-circle'>9</span> <b>Face Verification Results</b>", unsafe_allow_html=True)
+    
+    if face_verify_btn:
+        if id_image is None or selfie_image is None:
+            st.warning("⚠️ Please upload both ID/License image and Selfie image to proceed.")
+        else:
+            with st.spinner("Analyzing faces..."):
+                try:
+                    # Import face verification libraries only when needed
+                    import cv2
+                    import numpy as np
+                    from PIL import Image
+                    from deepface import DeepFace
+                    import tempfile
+
+                    # Load Haar cascade for face detection
+                    try:
+                        face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+                    except:
+                        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+
+                    # Face Verification Functions - defined here when needed
+                    def auto_crop_face(image_pil):
+                        if image_pil.mode != "RGB":
+                            image_pil = image_pil.convert("RGB")
+                        img_cv = cv2.cvtColor(np.array(image_pil), cv2.COLOR_RGB2BGR)
+                        best_crop = None
+                        max_area = 0
+                        for angle in [0, 90, 180, 270]:
+                            rotated = (
+                                img_cv if angle == 0 else
+                                cv2.rotate(img_cv, {
+                                    90: cv2.ROTATE_90_CLOCKWISE,
+                                    180: cv2.ROTATE_180,
+                                    270: cv2.ROTATE_90_COUNTERCLOCKWISE
+                                }[angle])
+                            )
+                            gray = cv2.cvtColor(rotated, cv2.COLOR_BGR2GRAY)
+                            faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
+                            for (x, y, w, h) in faces:
+                                area = w * h
+                                if area > max_area:
+                                    max_area = area
+                                    best_crop = rotated[y:y + h, x:x + w]
+                        return Image.fromarray(cv2.cvtColor(best_crop, cv2.COLOR_BGR2RGB)) if best_crop is not None else None
+
+                    def verify_faces(img1_pil, img2_pil):
+                        try:
+                            cropped1 = auto_crop_face(img1_pil)
+                            cropped2 = auto_crop_face(img2_pil)
+
+                            if cropped1 is None:
+                                return "❌ No face detected in License/ID image.", None, None
+                            if cropped2 is None:
+                                return "❌ No face detected in Selfie image.", None, None
+
+                            with tempfile.NamedTemporaryFile(suffix=".jpg") as tmp1, tempfile.NamedTemporaryFile(suffix=".jpg") as tmp2:
+                                cropped1.save(tmp1.name)
+                                cropped2.save(tmp2.name)
+
+                                models = ["ArcFace", "VGG-Face", "Facenet"]
+                                distances = []
+                                details = []
+
+                                for m in models:
+                                    result = DeepFace.verify(
+                                        tmp1.name,
+                                        tmp2.name,
+                                        model_name=m,
+                                        detector_backend="retinaface",
+                                        distance_metric="cosine",
+                                        enforce_detection=False,
+                                        align=True
+                                    )
+                                    dist = result["distance"]
+                                    sim = (1 - dist) * 100
+                                    distances.append(dist)
+                                    details.append(f"{m}: Distance={dist:.4f}, Similarity={sim:.2f}%")
+
+                            max_similarity = max((1 - d) * 100 for d in distances)
+
+                            if max_similarity > 55:
+                                verdict = "✅ Match (High Confidence based on highest score)"
+                            else:
+                                verdict = "❌ No Match"
+
+                            message = (
+                                f"{verdict}\n"
+                                f"Highest Similarity: {max_similarity:.2f}%\n"
+                                f"Models Used: {', '.join(models)}\n\n"
+                                f"Individual Scores:\n" + "\n".join(details)
+                            )
+                            return message, cropped1, cropped2
+
+                        except Exception as e:
+                            return f"Error: {str(e)}", None, None
+
+                    # Process the uploaded images
+                    id_img_pil = Image.open(id_image)
+                    selfie_img_pil = Image.open(selfie_image)
+
+                    message, cropped_id, cropped_selfie = verify_faces(id_img_pil, selfie_img_pil)
+
+                    # Display results in styled text area
+                    st.text_area("Face Match Results", message, height=200, key="face_results")
+
+                    # Display cropped faces if available
+                    if cropped_id is not None and cropped_selfie is not None:
+                        st.markdown("### Cropped Face Comparison")
+                        crop_col1, crop_col2 = st.columns(2)
+                        
+                        with crop_col1:
+                            st.markdown("**ID/License Face:**")
+                            st.image(cropped_id, width=200, caption="Extracted from ID document")
+                            
+                        with crop_col2:
+                            st.markdown("**Selfie Face:**")
+                            st.image(cropped_selfie, width=200, caption="Extracted from selfie")
+                            
+                except Exception as e:
+                    st.error(f"❌ Error processing images: {str(e)}")
 
 if __name__ == "__main__":
     main()
