@@ -533,14 +533,27 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                     import cv2
                     import numpy as np
                     from PIL import Image
-                    from deepface import DeepFace
                     import tempfile
+                    
+                    # Import DeepFace with error handling
+                    try:
+                        from deepface import DeepFace
+                        # Force TensorFlow to use CPU to avoid GPU-related issues
+                        import tensorflow as tf
+                        tf.config.set_visible_devices([], 'GPU')
+                    except Exception as import_error:
+                        st.error(f"❌ Could not import DeepFace library: {str(import_error)}")
+                        st.info("💡 Face verification requires the DeepFace library. Please install it with: pip install deepface")
+                        return
 
                     # Load Haar cascade for face detection
                     try:
                         face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
-                    except:
-                        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                        if face_cascade.empty():
+                            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                    except Exception as cascade_error:
+                        st.error(f"❌ Could not load face detection cascade: {str(cascade_error)}")
+                        return
 
                     # Face Verification Functions - defined here when needed
                     def auto_crop_face(image_pil):
@@ -581,42 +594,69 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                                 cropped1.save(tmp1.name)
                                 cropped2.save(tmp2.name)
 
-                                models = ["ArcFace", "VGG-Face", "Facenet"]
+                                # Try different models in order of reliability
+                                models_to_try = [
+                                    ("VGG-Face", "opencv"),
+                                    ("Facenet", "opencv"), 
+                                    ("ArcFace", "opencv"),
+                                    ("VGG-Face", "mtcnn"),
+                                    ("Facenet", "mtcnn")
+                                ]
+                                
                                 distances = []
                                 details = []
+                                successful_models = []
 
-                                for m in models:
-                                    result = DeepFace.verify(
-                                        tmp1.name,
-                                        tmp2.name,
-                                        model_name=m,
-                                        detector_backend="retinaface",
-                                        distance_metric="cosine",
-                                        enforce_detection=False,
-                                        align=True
-                                    )
-                                    dist = result["distance"]
-                                    sim = (1 - dist) * 100
-                                    distances.append(dist)
-                                    details.append(f"{m}: Distance={dist:.4f}, Similarity={sim:.2f}%")
+                                for model_name, detector in models_to_try:
+                                    try:
+                                        result = DeepFace.verify(
+                                            tmp1.name,
+                                            tmp2.name,
+                                            model_name=model_name,
+                                            detector_backend=detector,
+                                            distance_metric="cosine",
+                                            enforce_detection=False,
+                                            align=True
+                                        )
+                                        dist = result["distance"]
+                                        sim = (1 - dist) * 100
+                                        distances.append(dist)
+                                        details.append(f"{model_name} ({detector}): Distance={dist:.4f}, Similarity={sim:.2f}%")
+                                        successful_models.append(f"{model_name}-{detector}")
+                                        
+                                        # If we get 3 successful results, break
+                                        if len(distances) >= 3:
+                                            break
+                                            
+                                    except Exception as model_error:
+                                        # Log the error but continue with next model
+                                        details.append(f"{model_name} ({detector}): Failed - {str(model_error)}")
+                                        continue
 
-                            max_similarity = max((1 - d) * 100 for d in distances)
+                                if not distances:
+                                    return "❌ All face recognition models failed. Please try with clearer images.", cropped1, cropped2
 
-                            if max_similarity > 55:
-                                verdict = "✅ Match (High Confidence based on highest score)"
-                            else:
-                                verdict = "❌ No Match"
+                                max_similarity = max((1 - d) * 100 for d in distances)
+                                avg_similarity = sum((1 - d) * 100 for d in distances) / len(distances)
 
-                            message = (
-                                f"{verdict}\n"
-                                f"Highest Similarity: {max_similarity:.2f}%\n"
-                                f"Models Used: {', '.join(models)}\n\n"
-                                f"Individual Scores:\n" + "\n".join(details)
-                            )
-                            return message, cropped1, cropped2
+                                if max_similarity > 60:
+                                    verdict = "✅ Match (High Confidence)"
+                                elif max_similarity > 45:
+                                    verdict = "⚠️ Possible Match (Medium Confidence)"
+                                else:
+                                    verdict = "❌ No Match"
+
+                                message = (
+                                    f"{verdict}\n"
+                                    f"Highest Similarity: {max_similarity:.2f}%\n"
+                                    f"Average Similarity: {avg_similarity:.2f}%\n"
+                                    f"Successful Models: {len(distances)}/{len(models_to_try)}\n\n"
+                                    f"Model Results:\n" + "\n".join(details)
+                                )
+                                return message, cropped1, cropped2
 
                         except Exception as e:
-                            return f"Error: {str(e)}", None, None
+                            return f"❌ Face verification error: {str(e)}\n\nTip: Try using clearer images with good lighting.", None, None
 
                     # Process the uploaded images
                     id_img_pil = Image.open(id_image)
