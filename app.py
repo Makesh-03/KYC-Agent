@@ -13,15 +13,14 @@ import torch
 
 # --- Config ---
 try:
-    # Fix for meta tensor issue by loading model explicitly on CPU
+    # Force full model load on CPU to avoid meta tensor issues
     similarity_model = SentenceTransformer(
         "all-MiniLM-L6-v2",
         device='cpu',
-        cache_folder="./.cache_sbert"
+        cache_folder="./.cache_sbert",
+        torch_dtype=torch.float32,
+        device_map=None  # ensures model is fully loaded on CPU
     )
-    # Force model parameters to CPU
-    for param in similarity_model.parameters():
-        param.data = param.data.to(torch.device("cpu"))
 except Exception as e:
     st.error(f"Failed to load SentenceTransformer model: {str(e)}")
     st.stop()
@@ -30,7 +29,6 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 UNSTRACT_API_KEY = os.getenv("UNSTRACT_API_KEY")
 UNSTRACT_BASE = "https://llmwhisperer-api.us-central.unstract.com/api/v2"
-
 # --- The rest of your code stays exactly the same ---
 def filter_non_null_fields(data):
     return {k: v for k, v in data.items() if v not in [None, "null", "", "None", "Not provided"]}
