@@ -520,28 +520,42 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                         st.info("💡 Face verification requires the DeepFace library. Please install it with: pip install deepface")
                         st.stop()
 
-                    # ---- ArcFace compatibility probe (Keras 3 vs tf-keras shim) ----
+                    # ---- ArcFace compatibility probe (require TF 2.15 + Keras 2.x or tf-keras 2.15) ----
                     arcface_ok = False
                     arcface_reason = ""
+
+                    # Check TensorFlow version
                     try:
-                        # If tf-keras is available (2.15 shim), ArcFace generally works
-                        import tf_keras  # noqa: F401
-                        arcface_ok = True
+                        import tensorflow as tf  # noqa: F401
+                        tf_ok = str(tf.__version__).startswith("2.15")
+                    except Exception as e:
+                        tf_ok = False
+                        arcface_reason = f"TensorFlow not compatible ({e})"
+
+                    # Check for tf-keras shim and/or Keras 2.x
+                    tk_ok = False
+                    keras2_ok = False
+                    try:
+                        import tf_keras as _tk  # noqa: F401
+                        tk_ok = True
                     except Exception:
-                        try:
-                            import keras
-                            k_major = int(str(keras.__version__).split(".")[0])
-                            arcface_ok = (k_major < 3)  # ArcFace loader expects Keras 2.x
-                            if not arcface_ok:
-                                arcface_reason = f"Keras {keras.__version__} detected"
-                        except Exception as e:
-                            arcface_ok = False
+                        pass
+                    try:
+                        import keras  # noqa: F401
+                        keras2_ok = str(keras.__version__).startswith("2.")
+                        if not keras2_ok and not arcface_reason:
+                            arcface_reason = f"Keras {keras.__version__} detected"
+                    except Exception as e:
+                        if not arcface_reason:
                             arcface_reason = f"Keras not importable ({e})"
 
+                    arcface_ok = tf_ok and (tk_ok or keras2_ok)
+
                     if not arcface_ok:
-                        st.info("ℹ️ ArcFace disabled due to Keras/tf-keras mismatch. "
-                                "Using VGG-Face and Facenet only. "
-                                "Tip: pin TensorFlow/Keras to 2.15 or install tf-keras 2.15 to enable ArcFace.")
+                        st.info(
+                            "ℹ️ ArcFace disabled due to incompatible runtime. Requires TensorFlow 2.15.x and either "
+                            "Keras 2.x or tf-keras 2.15. Using VGG-Face and Facenet only."
+                        )
 
                     # Load Haar cascade for face detection
                     try:
@@ -607,8 +621,9 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                                 details = []
 
                                 if not arcface_ok and arcface_reason:
-                                    details.append(f"ArcFace skipped: {arcface_reason}. "
-                                                   f"Pin TF/Keras to 2.15 or install tf-keras 2.15 to enable.")
+                                    details.append(
+                                        f"ArcFace skipped: {arcface_reason}. Requires TF 2.15 + (Keras 2.x or tf-keras 2.15)."
+                                    )
 
                                 for model_name, detector in models_to_try:
                                     try:
