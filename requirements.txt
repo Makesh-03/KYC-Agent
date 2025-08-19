@@ -17,12 +17,12 @@ PyMuPDF
 deepface
 opencv-python-headless
 pillow
-numpy>=2.0.0,<2.3.0
+numpy
 tensorflow
-keras
+tf-keras
 mtcnn
 retina-face
-tf-keras
+
 
 
 # Note: The error is not related to missing packages.
