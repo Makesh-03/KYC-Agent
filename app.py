@@ -358,7 +358,7 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
         address_consistency_score, address_consistent = semantic_match(
             addresses[0], addresses[1], threshold=consistency_threshold
         )
-        # NEW: name consistency uses name_threshold
+        # Name consistency (uses name_threshold)
         if names[0] != "Not provided" and names[1] != "Not provided":
             name_consistency_score, name_consistent = semantic_match(
                 names[0], names[1], threshold=name_threshold
@@ -367,6 +367,10 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             name_consistency_score, name_consistent = (0, False)
 
         avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
+
+        # New: overall score = average of address consistency and name consistency
+        overall_score = (address_consistency_score + name_consistency_score) / 2.0
+        results["overall_score"] = round(overall_score, 3)
 
         results["address_consistency_score"] = round(address_consistency_score, 3)
         results["name_consistency_score"] = round(name_consistency_score, 3)
@@ -382,12 +386,14 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             f"✅ <b style='color:green;'>Verification Passed</b><br>"
             f"Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>"
             f"Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>"
+            f"Overall Score (Addr+Name): <b>{int(round(results['overall_score'] * 100))}%</b><br>"
             f"Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>"
             f"Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
             if results["final_result"]
             else f"❌ <b style='color:red;'>Verification Failed</b><br>"
                  f"Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>"
                  f"Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>"
+                 f"Overall Score (Addr+Name): <b>{int(round(results['overall_score'] * 100))}%</b><br>"
                  f"Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>"
                  f"Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
@@ -455,7 +461,7 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
         st.markdown("<span class='purple-circle'>3</span> <b>Set Address Consistency Threshold</b>", unsafe_allow_html=True)
         consistency_threshold = st.slider("Address Consistency Threshold", min_value=0.5, max_value=1.0, value=0.82, step=0.01)
 
-        # NEW: Name threshold slider
+        # Name threshold slider
         st.markdown("<span class='purple-circle'>4</span> <b>Set Name Consistency Threshold</b>", unsafe_allow_html=True)
         name_threshold = st.slider("Name Consistency Threshold", min_value=0.5, max_value=1.0, value=0.80, step=0.01)
 
@@ -477,7 +483,6 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                     file_inputs, expected_address, consistency_threshold, name_threshold
                 )
                 status_placeholder.markdown(status, unsafe_allow_html=True)
-                # Fixed: Use the HTML directly without dedent
                 output_placeholder.markdown(output_html, unsafe_allow_html=True)
                 json_placeholder.json(document_info_json)
         else:
