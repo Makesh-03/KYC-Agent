@@ -327,10 +327,10 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
 
     try:
         results = {}
-        kyc_fields = {}
         addresses = []
         names = []
         authenticity_scores = []
+        per_doc_clean_fields = {}
 
         for idx, file in enumerate(files):
             text = extract_text_from_file(file)
@@ -353,12 +353,15 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             results[f"google_maps_verified_{idx+1}"] = verified
             results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
 
-            kyc_fields[f"document_{idx+1}"] = filter_non_null_fields(fields)
+            # Keep per-document fields to show in dropdown (cleaned)
+            per_doc_clean_fields[f"document{idx+1}"] = filter_non_null_fields(fields)
 
+        # Address consistency between first two docs
         address_consistency_score, address_consistent = semantic_match(
             addresses[0], addresses[1], threshold=consistency_threshold
         )
-        # Name consistency (uses name_threshold)
+
+        # Name consistency using name_threshold
         if names[0] != "Not provided" and names[1] != "Not provided":
             name_consistency_score, name_consistent = semantic_match(
                 names[0], names[1], threshold=name_threshold
@@ -366,22 +369,26 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
         else:
             name_consistency_score, name_consistent = (0, False)
 
+        # Average authenticity
         avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
 
-        # New: overall score = average of address consistency and name consistency
+        # Overall score (address + name) average
         overall_score = (address_consistency_score + name_consistency_score) / 2.0
-        results["overall_score"] = round(overall_score, 3)
 
+        # Populate results for the table header
         results["address_consistency_score"] = round(address_consistency_score, 3)
         results["name_consistency_score"] = round(name_consistency_score, 3)
         results["document_consistency_score"] = round(address_consistency_score, 3)
         results["documents_consistent"] = address_consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
+        results["overall_score"] = round(overall_score, 3)
 
+        # Final decision logic unchanged
         results["final_result"] = all(
             [results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"] for i in range(len(files))]
         ) and (address_consistency_score >= consistency_threshold) and name_consistent
 
+        # Status block (shows scores in %)
         status = (
             f"✅ <b style='color:green;'>Verification Passed</b><br>"
             f"Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>"
@@ -393,11 +400,26 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             else f"❌ <b style='color:red;'>Verification Failed</b><br>"
                  f"Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>"
                  f"Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>"
-                 f"Overall Score: <b>{int(round(results['overall_score'] * 100))}%</b><br>"
+                 f"Overall Score (Addr+Name): <b>{int(round(results['overall_score'] * 100))}%</b><br>"
                  f"Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>"
                  f"Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
-        return status, format_verification_table(results), kyc_fields
+
+        # ── JSON dropdown payload in the exact structure requested ─────────────
+        result_block = {
+            "Address Consistency Score": f"{int(round(address_consistency_score * 100))}%",
+            "Name Consistency Score": f"{int(round(results['name_consistency_score'] * 100))}%",
+            "Overall Score": f"{int(round(results['overall_score'] * 100))}%",
+            "Overall Consistency Score": f"{int(round(results['document_consistency_score'] * 100))}%",
+            "Average Authenticity Score": f"{int(round(avg_authenticity_score * 100))}%"
+        }
+        data_block = {"result": result_block}
+        # add document1, document2, ... (no underscore) alongside result
+        data_block.update(per_doc_clean_fields)
+        json_dropdown_payload = {"data": data_block}
+        # ───────────────────────────────────────────────────────────────────────
+
+        return status, format_verification_table(results), json_dropdown_payload
 
     except Exception as e:
         return f"❌ Error: {str(e)}", "", {}
@@ -461,7 +483,6 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
         st.markdown("<span class='purple-circle'>3</span> <b>Set Address Consistency Threshold</b>", unsafe_allow_html=True)
         consistency_threshold = st.slider("Address Consistency Threshold", min_value=0.5, max_value=1.0, value=0.82, step=0.01)
 
-        # Name threshold slider
         st.markdown("<span class='purple-circle'>4</span> <b>Set Name Consistency Threshold</b>", unsafe_allow_html=True)
         name_threshold = st.slider("Name Consistency Threshold", min_value=0.5, max_value=1.0, value=0.80, step=0.01)
 
@@ -484,12 +505,13 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                 )
                 status_placeholder.markdown(status, unsafe_allow_html=True)
                 output_placeholder.markdown(output_html, unsafe_allow_html=True)
+                # Show JSON in the exact structure:
+                # {"data": {"result": {...}, "document1": {...}, "document2": {...}, ...}}
                 json_placeholder.json(document_info_json)
         else:
             st.error(
                 "Please provide all required inputs: at least two documents, expected address, and both thresholds."
             )
-
 
     # Face Verification Section - MOVED TO THE END
     st.markdown("<hr style='border: 1px solid #a020f0; margin: 30px 0;'>", unsafe_allow_html=True)
