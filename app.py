@@ -199,7 +199,7 @@ def extract_kyc_fields(text):
                     "photo_base64": "Not provided",
                     "signature_base64": "Not provided",
                     "additional_info": "Not provided",
-                    "error": "No JSON block found",
+                    "error": "Failed to parse KYC fields",
                     "raw_output": raw_output,
                 }
             )
@@ -388,19 +388,19 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             [results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"] for i in range(len(files))]
         ) and (address_consistency_score >= consistency_threshold) and name_consistent
 
-        # Status block (shows scores in %)
+        # Status block — REORDERED to show Overall Score first and renamed label
         status = (
             f"✅ <b style='color:green;'>Verification Passed</b><br>"
+            f"Overall Score: <b>{int(round(results['overall_score'] * 100))}%</b><br>"
             f"Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>"
             f"Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>"
-            f"Overall Score (Addr+Name): <b>{int(round(results['overall_score'] * 100))}%</b><br>"
             f"Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>"
             f"Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
             if results["final_result"]
             else f"❌ <b style='color:red;'>Verification Failed</b><br>"
+                 f"Overall Score: <b>{int(round(results['overall_score'] * 100))}%</b><br>"
                  f"Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>"
                  f"Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>"
-                 f"Overall Score (Addr+Name): <b>{int(round(results['overall_score'] * 100))}%</b><br>"
                  f"Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>"
                  f"Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
@@ -699,13 +699,13 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                                 else:
                                     verdict = "❌ No Match"
 
-                                # Display message (ONLY first two lines as requested)
+                                # Display message (ONLY verdict + matching score)
                                 display_message = (
                                     f"{verdict}\n"
                                     f"Matching score: {max_similarity:.2f}%"
                                 )
 
-                                # Build debug JSON payload (moved to Debug dropdown)
+                                # Build debug JSON payload (for Debug dropdown)
                                 debug_info.update({
                                     "average_similarity_percent": round(avg_similarity, 2),
                                     "successful_models": f"{len(distances)}/{len(models_to_try)}",
