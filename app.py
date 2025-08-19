@@ -393,7 +393,7 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             else f"❌ <b style='color:red;'>Verification Failed</b><br>"
                  f"Address Consistency Score: <b>{int(round(address_consistency_score * 100))}%</b><br>"
                  f"Name Consistency Score: <b>{int(round(results['name_consistency_score'] * 100))}%</b><br>"
-                 f"Overall Score (Addr+Name): <b>{int(round(results['overall_score'] * 100))}%</b><br>"
+                 f"Overall Score: <b>{int(round(results['overall_score'] * 100))}%</b><br>"
                  f"Overall Consistency Score: <b>{int(round(results['document_consistency_score'] * 100))}%</b><br>"
                  f"Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
