@@ -354,7 +354,7 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
 
             # Keep per-document fields to show in dropdown (cleaned)
-            per_doc_clean_fields[f"document{idx+1}"] = filter_non_null_fields(fields)
+            per_doc_clean_fields[f"document1" if idx == 0 else f"document{idx+1}"] = filter_non_null_fields(fields)
 
         # Address consistency between first two docs
         address_consistency_score, address_consistent = semantic_match(
@@ -414,7 +414,6 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             "Average Authenticity Score": f"{int(round(avg_authenticity_score * 100))}%"
         }
         data_block = {"result": result_block}
-        # add document1, document2, ... (no underscore) alongside result
         data_block.update(per_doc_clean_fields)
         json_dropdown_payload = {"data": data_block}
         # ───────────────────────────────────────────────────────────────────────
@@ -494,8 +493,12 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
     st.markdown("<span class='purple-circle'>6</span> <b>KYC Verification Details</b>", unsafe_allow_html=True)
     with st.expander("View Full Verification Details", expanded=False):
         output_placeholder = st.empty()
-        st.markdown("### Extracted Document Details")
+
+    # ── NEW: Separate Debug Section for the JSON dropdown ─────────────────────
+    st.markdown("<h3>🐞 Debug</h3>", unsafe_allow_html=True)
+    with st.expander("Extracted Document Details (JSON)", expanded=False):
         json_placeholder = st.json({})
+    # ──────────────────────────────────────────────────────────────────────────
 
     if verify_btn:
         if file_inputs and expected_address and consistency_threshold and name_threshold:
@@ -505,8 +508,6 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                 )
                 status_placeholder.markdown(status, unsafe_allow_html=True)
                 output_placeholder.markdown(output_html, unsafe_allow_html=True)
-                # Show JSON in the exact structure:
-                # {"data": {"result": {...}, "document1": {...}, "document2": {...}, ...}}
                 json_placeholder.json(document_info_json)
         else:
             st.error(
