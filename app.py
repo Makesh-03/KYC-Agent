@@ -321,7 +321,7 @@ def format_verification_table(results):
     
     return table_html
 
-def kyc_multi_verify(files, expected_address, consistency_threshold):
+def kyc_multi_verify(files, expected_address, consistency_threshold, name_threshold):
     if not files or len(files) < 2:
         return "❌ Please upload at least two documents.", "", {}
 
@@ -358,21 +358,25 @@ def kyc_multi_verify(files, expected_address, consistency_threshold):
         address_consistency_score, address_consistent = semantic_match(
             addresses[0], addresses[1], threshold=consistency_threshold
         )
+        # NEW: name consistency uses name_threshold
+        if names[0] != "Not provided" and names[1] != "Not provided":
+            name_consistency_score, name_consistent = semantic_match(
+                names[0], names[1], threshold=name_threshold
+            )
+        else:
+            name_consistency_score, name_consistent = (0, False)
+
         avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
 
         results["address_consistency_score"] = round(address_consistency_score, 3)
-        results["name_consistency_score"] = (
-            semantic_match(names[0], names[1])[0]
-            if names[0] != "Not provided" and names[1] != "Not provided"
-            else 0
-        )
+        results["name_consistency_score"] = round(name_consistency_score, 3)
         results["document_consistency_score"] = round(address_consistency_score, 3)
         results["documents_consistent"] = address_consistent
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
 
         results["final_result"] = all(
             [results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"] for i in range(len(files))]
-        ) and (address_consistency_score >= consistency_threshold)
+        ) and (address_consistency_score >= consistency_threshold) and name_consistent
 
         status = (
             f"✅ <b style='color:green;'>Verification Passed</b><br>"
@@ -448,25 +452,29 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
         st.markdown("<span class='purple-circle'>2</span> <b>Enter Expected Address</b>", unsafe_allow_html=True)
         expected_address = st.text_input("Expected Address", placeholder="e.g., 123 Main St, Toronto, ON, M5V 2N2")
 
-        st.markdown("<span class='purple-circle'>3</span> <b>Set Consistency Threshold</b>", unsafe_allow_html=True)
-        consistency_threshold = st.slider("Consistency Threshold", min_value=0.5, max_value=1.0, value=0.82, step=0.01)
+        st.markdown("<span class='purple-circle'>3</span> <b>Set Address Consistency Threshold</b>", unsafe_allow_html=True)
+        consistency_threshold = st.slider("Address Consistency Threshold", min_value=0.5, max_value=1.0, value=0.82, step=0.01)
+
+        # NEW: Name threshold slider
+        st.markdown("<span class='purple-circle'>4</span> <b>Set Name Consistency Threshold</b>", unsafe_allow_html=True)
+        name_threshold = st.slider("Name Consistency Threshold", min_value=0.5, max_value=1.0, value=0.80, step=0.01)
 
     verify_btn = st.button("🔍 Verify Now")
 
-    st.markdown("<span class='purple-circle'>4</span> <b>KYC Verification Status</b>", unsafe_allow_html=True)
+    st.markdown("<span class='purple-circle'>5</span> <b>KYC Verification Status</b>", unsafe_allow_html=True)
     status_placeholder = st.empty()
 
-    st.markdown("<span class='purple-circle'>5</span> <b>KYC Verification Details</b>", unsafe_allow_html=True)
+    st.markdown("<span class='purple-circle'>6</span> <b>KYC Verification Details</b>", unsafe_allow_html=True)
     with st.expander("View Full Verification Details", expanded=False):
         output_placeholder = st.empty()
         st.markdown("### Extracted Document Details")
         json_placeholder = st.json({})
 
     if verify_btn:
-        if file_inputs and expected_address and consistency_threshold:
+        if file_inputs and expected_address and consistency_threshold and name_threshold:
             with st.spinner("Verifying..."):
                 status, output_html, document_info_json = kyc_multi_verify(
-                    file_inputs, expected_address, consistency_threshold
+                    file_inputs, expected_address, consistency_threshold, name_threshold
                 )
                 status_placeholder.markdown(status, unsafe_allow_html=True)
                 # Fixed: Use the HTML directly without dedent
@@ -474,7 +482,7 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                 json_placeholder.json(document_info_json)
         else:
             st.error(
-                "Please provide all required inputs: at least two documents, expected address, and consistency threshold."
+                "Please provide all required inputs: at least two documents, expected address, and both thresholds."
             )
 
 
