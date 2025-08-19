@@ -354,7 +354,7 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
 
             # Keep per-document fields to show in dropdown (cleaned)
-            per_doc_clean_fields[f"document1" if idx == 0 else f"document{idx+1}"] = filter_non_null_fields(fields)
+            per_doc_clean_fields[f"document{idx+1}"] = filter_non_null_fields(fields)
 
         # Address consistency between first two docs
         address_consistency_score, address_consistent = semantic_match(
@@ -405,7 +405,7 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
                  f"Average Authenticity Score: <b>{int(round(avg_authenticity_score * 100))}%</b>"
         )
 
-        # ── JSON dropdown payload in the exact structure requested ─────────────
+        # ── JSON dropdown payload (KYC) ────────────────────────────────────────
         result_block = {
             "Address Consistency Score": f"{int(round(address_consistency_score * 100))}%",
             "Name Consistency Score": f"{int(round(results['name_consistency_score'] * 100))}%",
@@ -416,6 +416,8 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
         data_block = {"result": result_block}
         data_block.update(per_doc_clean_fields)
         json_dropdown_payload = {"data": data_block}
+        # Save to session for Debug section (rendered at the very end)
+        st.session_state["kyc_debug_json"] = json_dropdown_payload
         # ───────────────────────────────────────────────────────────────────────
 
         return status, format_verification_table(results), json_dropdown_payload
@@ -494,21 +496,14 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
     with st.expander("View Full Verification Details", expanded=False):
         output_placeholder = st.empty()
 
-    # ── NEW: Separate Debug Section for the JSON dropdown ─────────────────────
-    st.markdown("<h3>🐞 Debug</h3>", unsafe_allow_html=True)
-    with st.expander("Extracted Document Details (JSON)", expanded=False):
-        json_placeholder = st.json({})
-    # ──────────────────────────────────────────────────────────────────────────
-
     if verify_btn:
         if file_inputs and expected_address and consistency_threshold and name_threshold:
             with st.spinner("Verifying..."):
-                status, output_html, document_info_json = kyc_multi_verify(
+                status, output_html, _document_info_json = kyc_multi_verify(
                     file_inputs, expected_address, consistency_threshold, name_threshold
                 )
                 status_placeholder.markdown(status, unsafe_allow_html=True)
                 output_placeholder.markdown(output_html, unsafe_allow_html=True)
-                json_placeholder.json(document_info_json)
         else:
             st.error(
                 "Please provide all required inputs: at least two documents, expected address, and both thresholds."
@@ -633,9 +628,9 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                             cropped2 = auto_crop_face(img2_pil)
 
                             if cropped1 is None:
-                                return "❌ No face detected in License/ID image.", None, None
+                                return "❌ No face detected in License/ID image.", None, None, None
                             if cropped2 is None:
-                                return "❌ No face detected in Selfie image.", None, None
+                                return "❌ No face detected in Selfie image.", None, None, None
 
                             with tempfile.NamedTemporaryFile(suffix=".jpg") as tmp1, tempfile.NamedTemporaryFile(suffix=".jpg") as tmp2:
                                 cropped1.save(tmp1.name)
@@ -654,10 +649,11 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                                 ])
 
                                 distances = []
-                                details = []
+                                model_results = []  # structured per-model results
 
+                                debug_info = {}
                                 if not arcface_ok and arcface_reason:
-                                    details.append(
+                                    debug_info["arcface_note"] = (
                                         f"ArcFace skipped: {arcface_reason}. Requires TF 2.15 + (Keras 2.x or tf-keras 2.15)."
                                     )
 
@@ -675,18 +671,23 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                                         dist = float(result.get("distance", 1.0))
                                         sim = (1 - dist) * 100
                                         distances.append(dist)
-                                        details.append(f"{model_name} ({detector}): Distance={dist:.4f}, Similarity={sim:.2f}%")
+                                        model_results.append({
+                                            "model": model_name,
+                                            "detector": detector,
+                                            "distance": round(dist, 4),
+                                            "similarity_percent": round(sim, 2)
+                                        })
 
                                         # Stop early once we have 3 successful signals
                                         if len(distances) >= 3:
                                             break
 
-                                    except Exception as model_error:
-                                        details.append(f"{model_name} ({detector}): Failed - {str(model_error)}")
+                                    except Exception:
+                                        # Skip failed model entries in results list
                                         continue
 
                                 if not distances:
-                                    return "❌ All face recognition models failed. Please try with clearer images.", cropped1, cropped2
+                                    return "❌ All face recognition models failed. Please try with clearer images.", None, None, None
 
                                 max_similarity = max((1 - d) * 100 for d in distances)
                                 avg_similarity = sum((1 - d) * 100 for d in distances) / len(distances)
@@ -698,27 +699,37 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                                 else:
                                     verdict = "❌ No Match"
 
-                                message = (
+                                # Display message (ONLY first two lines as requested)
+                                display_message = (
                                     f"{verdict}\n"
-                                    f"Highest Similarity: {max_similarity:.2f}%\n"
-                                    f"Average Similarity: {avg_similarity:.2f}%\n"
-                                    f"Successful Models: {len(distances)}/{len(models_to_try)}\n\n"
-                                    f"Model Results:\n" + "\n".join(details)
+                                    f"Matching score: {max_similarity:.2f}%"
                                 )
-                                return message, cropped1, cropped2
+
+                                # Build debug JSON payload (moved to Debug dropdown)
+                                debug_info.update({
+                                    "average_similarity_percent": round(avg_similarity, 2),
+                                    "successful_models": f"{len(distances)}/{len(models_to_try)}",
+                                    "model_results": model_results
+                                })
+
+                                return display_message, debug_info, cropped1, cropped2
 
                         except Exception as e:
                             return (f"❌ Face verification error: {str(e)}\n\n"
-                                    f"Tip: Try using clearer images with good lighting."), None, None
+                                    f"Tip: Try using clearer images with good lighting."), None, None, None
 
                     # Process the uploaded images
                     id_img_pil = Image.open(id_image)
                     selfie_img_pil = Image.open(selfie_image)
 
-                    message, cropped_id, cropped_selfie = verify_faces(id_img_pil, selfie_img_pil, arcface_ok, arcface_reason)
+                    message, face_debug, cropped_id, cropped_selfie = verify_faces(id_img_pil, selfie_img_pil, arcface_ok, arcface_reason)
 
-                    # Display results in styled text area
-                    st.text_area("Face Match Results", message, height=200, key="face_results")
+                    # Display results in styled text area (now only verdict + matching score)
+                    st.text_area("Face Match Results", message, height=120, key="face_results")
+
+                    # Save face debug JSON to session for Debug dropdown at the end
+                    if face_debug is not None:
+                        st.session_state["face_debug_json"] = {"data": {"face_verification": face_debug}}
 
                     # Display cropped faces if available
                     if cropped_id is not None and cropped_selfie is not None:
@@ -733,6 +744,20 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
 
                 except Exception as e:
                     st.error(f"❌ Error processing images: {str(e)}")
+
+    # ── DEBUG SECTION MOVED TO THE VERY END (after face recognition results) ───
+    st.markdown("<hr style='border: 1px solid #a020f0; margin: 30px 0;'>", unsafe_allow_html=True)
+    st.markdown("<h3>🐞 Debug</h3>", unsafe_allow_html=True)
+    with st.expander("Debug Data (JSON)", expanded=False):
+        # Merge KYC debug JSON and Face verification debug JSON under a single 'data' object
+        debug_payload = st.session_state.get("kyc_debug_json", {"data": {}})
+        if "data" not in debug_payload:
+            debug_payload["data"] = {}
+        face_dbg = st.session_state.get("face_debug_json")
+        if isinstance(face_dbg, dict) and "data" in face_dbg and "face_verification" in face_dbg["data"]:
+            debug_payload["data"]["face_verification"] = face_dbg["data"]["face_verification"]
+        st.json(debug_payload)
+    # ──────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     main()
