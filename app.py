@@ -479,7 +479,7 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
 
 
     # Face Verification Section - MOVED TO THE END
-    st.markdown("<hr style='border: 1px solid #a020f0; margin: 30px 0;'>", unsafe_allow_html=True)
+st.markdown("<hr style='border: 1px solid #a020f0; margin: 30px 0;'>", unsafe_allow_html=True)
 st.markdown("<h3>🧑‍💼 Face Verification</h3>", unsafe_allow_html=True)
 st.markdown("Compare faces from ID document and selfie image using advanced deep learning models.", unsafe_allow_html=True)
 
