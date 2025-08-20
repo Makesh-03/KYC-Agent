@@ -308,7 +308,7 @@ def format_verification_table(results):
         table_html += f'''<tr>
 <td style="padding:8px; border-bottom:1px solid #333; width:5%; text-align:center;">{idx+1}</td>
 <td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-all; overflow-wrap:break-word;">{address}</td>
-<td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:break-word;">{name}</td>
+<td style="padding:8px; border-bottom:1px solid #333; width:25%; word-break:word;">{name}</td>
 <td style="padding:8px; border-bottom:1px solid #333; width:10%; text-align:center;">{sim_pct}%</td>
 <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{match_color}; font-weight:700; text-align:center;">{match_text}</td>
 <td style="padding:8px; border-bottom:1px solid #333; width:10%; color:{maps_color}; font-weight:700; text-align:center;">{maps_text}</td>
@@ -321,6 +321,98 @@ def format_verification_table(results):
     
     return table_html
 
+# ── Decision + LLM Reasoning helpers ─────────────────────────────────────────
+LLM_DECISION_PROMPT = """
+You are a concise KYC compliance analyst. You receive a structured JSON input and you MUST return a SINGLE JSON object with exactly these keys:
+- "decision": string (MUST equal the provided "computed_decision")
+- "score": number (MUST equal the provided "computed_score")
+- "reason": string (1–4 sentences, factual, references actual numeric values and thresholds)
+
+Rules:
+- Do NOT invent values. Use ONLY what is provided.
+- If names across documents differ, say so and show both names.
+- If address consistency is below threshold, say so and include both the % and threshold.
+- If any Google Maps verification failed, mention which document index(es).
+- If face matching is < 55%, say "face didn't match" / "appears to be different person".
+- If 45–59.99%, call it "borderline face match".
+- If face verification not performed, state that plainly.
+- If everything passes, say that all checks satisfied the thresholds.
+- Return PURE JSON only. No markdown, no commentary.
+
+Input JSON:
+{input_json}
+"""
+
+def compute_decision_and_score(doc_stats: dict | None, face_stats: dict | None):
+    """
+    Deterministic decision/score from existing metrics.
+    Returns (decision: str, combined_score: float).
+    """
+    if not doc_stats:
+        # No document verification → reject (we can relax later if desired)
+        combined = float(face_stats["matching_score_pct"]) if face_stats and "matching_score_pct" in face_stats else 0.0
+        return "REJECTED", round(combined, 1)
+
+    addr_t = int(doc_stats["thresholds"].get("address_pct", 82))
+    name_t = int(doc_stats["thresholds"].get("name_pct", 80))
+
+    addr_pct = int(doc_stats.get("address_consistency_pct", 0))
+    name_pct = int(doc_stats.get("name_consistency_pct", 0))
+    overall_pct = int(doc_stats.get("overall_score_pct", 0))
+    maps_all_ok = all(doc_stats.get("maps_verified_flags", [])) if doc_stats.get("maps_verified_flags") else False
+    doc_final_result = bool(st.session_state.get("doc_final_result", False))
+
+    # Face tiers
+    face_present = face_stats is not None and "matching_score_pct" in face_stats
+    matching = float(face_stats["matching_score_pct"]) if face_present else None
+    face_pass = face_present and matching is not None and matching >= 60
+    face_borderline = face_present and matching is not None and 45 <= matching < 60
+
+    # Combined score
+    if face_present and matching is not None:
+        combined = round(0.6 * overall_pct + 0.4 * matching, 1)
+    else:
+        combined = round(float(overall_pct), 1)
+
+    # Doc pass primarily uses your existing final flag (already includes thresholds + maps + matches)
+    doc_pass = doc_final_result and addr_pct >= addr_t and name_pct >= name_t and maps_all_ok
+
+    # Decision tiers
+    if doc_pass and face_pass:
+        decision = "APPROVED"
+    elif doc_pass and not face_present:
+        decision = "PARTIALLY APPROVED"
+    elif doc_pass and face_borderline:
+        decision = "PARTIALLY APPROVED"
+    elif overall_pct >= 60 and (face_pass or face_borderline):
+        decision = "PARTIALLY APPROVED"
+    else:
+        decision = "REJECTED"
+
+    return decision, combined
+
+def extract_json_block(text: str) -> dict:
+    m = re.search(r"\{[\s\S]*\}\s*$", text.strip())
+    if not m:
+        raise ValueError("LLM did not return JSON")
+    return json.loads(m.group(0))
+
+def generate_llm_reason(doc_stats: dict | None, face_stats: dict | None, decision: str, score: float) -> dict:
+    input_payload = {
+        "computed_decision": decision,
+        "computed_score": score,
+        "document_verification": doc_stats if doc_stats else {"note": "not_performed"},
+        "face_verification": face_stats if face_stats else {"note": "not_performed"},
+    }
+    chain = LLMChain(
+        llm=get_llm(),
+        prompt=PromptTemplate(template=LLM_DECISION_PROMPT, input_variables=["input_json"])
+    )
+    resp = chain.invoke({"input_json": json.dumps(input_payload, ensure_ascii=False)})
+    return extract_json_block(resp["text"])
+
+# ──────────────────────────────────────────────────────────────────────────────
+
 def kyc_multi_verify(files, expected_address, consistency_threshold, name_threshold):
     if not files or len(files) < 2:
         return "❌ Please upload at least two documents.", "", {}
@@ -331,6 +423,9 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
         names = []
         authenticity_scores = []
         per_doc_clean_fields = {}
+
+        address_match_flags = []
+        maps_verified_flags = []
 
         for idx, file in enumerate(files):
             text = extract_text_from_file(file)
@@ -352,6 +447,9 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             results[f"address_match_{idx+1}"] = match
             results[f"google_maps_verified_{idx+1}"] = verified
             results[f"authenticity_score_{idx+1}"] = round(auth_score, 3)
+
+            address_match_flags.append(match)
+            maps_verified_flags.append(verified)
 
             # Keep per-document fields to show in dropdown (cleaned)
             per_doc_clean_fields[f"document{idx+1}"] = filter_non_null_fields(fields)
@@ -383,7 +481,7 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
         results["overall_score"] = round(overall_score, 3)
 
-        # Final decision logic unchanged
+        # Final decision logic (documents)
         results["final_result"] = all(
             [results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"] for i in range(len(files))]
         ) and (address_consistency_score >= consistency_threshold) and name_consistent
@@ -416,8 +514,28 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
         data_block = {"result": result_block}
         data_block.update(per_doc_clean_fields)
         json_dropdown_payload = {"data": data_block}
-        # Save to session for Debug section
+        # Save to session for Debug section (rendered at the very end)
         st.session_state["kyc_debug_json"] = json_dropdown_payload
+
+        # Persist thresholds & doc stats for decision engine + LLM
+        st.session_state["address_threshold_pct"] = int(round(consistency_threshold * 100))
+        st.session_state["name_threshold_pct"] = int(round(name_threshold * 100))
+        st.session_state["doc_final_result"] = bool(results["final_result"])
+        st.session_state["doc_stats"] = {
+            "address_consistency_pct": int(round(address_consistency_score * 100)),
+            "name_consistency_pct": int(round(results['name_consistency_score'] * 100)),
+            "overall_score_pct": int(round(results['overall_score'] * 100)),
+            "overall_consistency_pct": int(round(results['document_consistency_score'] * 100)),
+            "average_authenticity_pct": int(round(avg_authenticity_score * 100)),
+            "address_match_flags": address_match_flags,
+            "maps_verified_flags": maps_verified_flags,
+            "names": names[:2],        # use first two for comparison context
+            "addresses": addresses[:2],
+            "thresholds": {
+                "address_pct": st.session_state.get("address_threshold_pct", 82),
+                "name_pct": st.session_state.get("name_threshold_pct", 80),
+            }
+        }
 
         # NEW: persist KYC visible outputs
         st.session_state["kyc_status_html"] = status
@@ -499,7 +617,7 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
     with st.expander("View Full Verification Details", expanded=False):
         output_placeholder = st.empty()
 
-    # NEW: Rehydrate KYC outputs every run
+    # Rehydrate KYC outputs every run
     if "kyc_status_html" in st.session_state:
         status_placeholder.markdown(st.session_state["kyc_status_html"], unsafe_allow_html=True)
     if "kyc_output_html" in st.session_state:
@@ -720,9 +838,9 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                                 if max_similarity > 60:
                                     verdict = "✅ Match (High Confidence)"
                                 elif max_similarity > 45:
-                                    verdict = "⚠️ Possible Match (Medium Confidence)"
+                                    verdict = "⚠️ Borderline Face Match"
                                 else:
-                                    verdict = "❌ No Match"
+                                    verdict = "❌ Face Didn't Match"
 
                                 # Display message (ONLY verdict + matching score)
                                 display_message = (
@@ -732,6 +850,7 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
 
                                 # Build debug JSON payload (for Debug dropdown)
                                 debug_info.update({
+                                    "matching_score_pct": round(max_similarity, 2),          # added
                                     "average_similarity_percent": round(avg_similarity, 2),
                                     "successful_models": f"{len(distances)}/{len(models_to_try)}",
                                     "model_results": model_results
@@ -754,9 +873,14 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                     st.session_state["face_cropped_id"] = cropped_id
                     st.session_state["face_cropped_selfie"] = cropped_selfie
 
-                    # Save face debug JSON to session for Debug dropdown at the end
+                    # Save face debug JSON + face_stats to session for decision/LLM
                     if face_debug is not None:
                         st.session_state["face_debug_json"] = {"data": {"face_verification": face_debug}}
+                        st.session_state["face_stats"] = {
+                            "matching_score_pct": face_debug.get("matching_score_pct"),
+                            "average_similarity_pct": face_debug.get("average_similarity_percent"),
+                            "successful_models": face_debug.get("successful_models"),
+                        }
 
                     # Also render immediately this run
                     st.session_state["face_message"] = message  # already set
@@ -764,7 +888,7 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                 except Exception as e:
                     st.error(f"❌ Error processing images: {str(e)}")
 
-    # ── DEBUG SECTION MOVED TO THE VERY END (after face recognition results) ───
+    # ── DEBUG SECTION (Decision + LLM reason injected here) ────────────────────
     st.markdown("<hr style='border: 1px solid #a020f0; margin: 30px 0;'>", unsafe_allow_html=True)
     st.markdown("<h3>🐞 Debug</h3>", unsafe_allow_html=True)
     with st.expander("Debug Data (JSON)", expanded=False):
@@ -775,6 +899,33 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
         face_dbg = st.session_state.get("face_debug_json")
         if isinstance(face_dbg, dict) and "data" in face_dbg and "face_verification" in face_dbg["data"]:
             debug_payload["data"]["face_verification"] = face_dbg["data"]["face_verification"]
+
+        # Build or refresh decision block (deterministic) + ask LLM for reason
+        doc_stats = st.session_state.get("doc_stats")
+        face_stats = st.session_state.get("face_stats")
+
+        try:
+            decision, combined_score = compute_decision_and_score(doc_stats, face_stats)
+            llm_block = generate_llm_reason(doc_stats, face_stats, decision, combined_score)
+            # Ensure LLM echoes our decision/score; fallback to deterministic if missing
+            debug_payload["data"]["decision"] = llm_block.get("decision", decision)
+            debug_payload["data"]["score"] = llm_block.get("score", combined_score)
+            debug_payload["data"]["reason"] = llm_block.get("reason", f"Decision={decision}, score={combined_score}.")
+        except Exception as e:
+            # Fallback if LLM errors
+            if doc_stats or face_stats:
+                fallback_decision, fallback_score = compute_decision_and_score(doc_stats, face_stats)
+                debug_payload["data"]["decision"] = fallback_decision
+                debug_payload["data"]["score"] = fallback_score
+                debug_payload["data"]["reason"] = (
+                    f"Automated fallback summary. Decision={fallback_decision}, score={fallback_score}. "
+                    f"{'Face verification not performed.' if not face_stats else ''}"
+                )
+            else:
+                debug_payload["data"]["decision"] = "REJECTED"
+                debug_payload["data"]["score"] = 0.0
+                debug_payload["data"]["reason"] = "Insufficient data: run document verification and/or face verification."
+
         st.json(debug_payload)
     # ──────────────────────────────────────────────────────────────────────────
 
