@@ -388,7 +388,7 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             [results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"] for i in range(len(files))]
         ) and (address_consistency_score >= consistency_threshold) and name_consistent
 
-        # Status block — REORDERED to show Overall Score first and renamed label
+        # Status block — Overall Score first
         status = (
             f"✅ <b style='color:green;'>Verification Passed</b><br>"
             f"Overall Score: <b>{int(round(results['overall_score'] * 100))}%</b><br>"
@@ -416,11 +416,14 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
         data_block = {"result": result_block}
         data_block.update(per_doc_clean_fields)
         json_dropdown_payload = {"data": data_block}
-        # Save to session for Debug section (rendered at the very end)
+        # Save to session for Debug section
         st.session_state["kyc_debug_json"] = json_dropdown_payload
-        # ───────────────────────────────────────────────────────────────────────
 
-        return status, format_verification_table(results), json_dropdown_payload
+        # NEW: persist KYC visible outputs
+        st.session_state["kyc_status_html"] = status
+        st.session_state["kyc_output_html"] = format_verification_table(results)
+
+        return status, st.session_state["kyc_output_html"], json_dropdown_payload
 
     except Exception as e:
         return f"❌ Error: {str(e)}", "", {}
@@ -496,12 +499,19 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
     with st.expander("View Full Verification Details", expanded=False):
         output_placeholder = st.empty()
 
+    # NEW: Rehydrate KYC outputs every run
+    if "kyc_status_html" in st.session_state:
+        status_placeholder.markdown(st.session_state["kyc_status_html"], unsafe_allow_html=True)
+    if "kyc_output_html" in st.session_state:
+        output_placeholder.markdown(st.session_state["kyc_output_html"], unsafe_allow_html=True)
+
     if verify_btn:
         if file_inputs and expected_address and consistency_threshold and name_threshold:
             with st.spinner("Verifying..."):
                 status, output_html, _document_info_json = kyc_multi_verify(
                     file_inputs, expected_address, consistency_threshold, name_threshold
                 )
+                # Also render immediately this run
                 status_placeholder.markdown(status, unsafe_allow_html=True)
                 output_placeholder.markdown(output_html, unsafe_allow_html=True)
         else:
@@ -527,6 +537,21 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
     face_verify_btn = st.button("🔍 Compare Faces")
 
     st.markdown("<span class='purple-circle'>9</span> <b>Face Verification Results</b>", unsafe_allow_html=True)
+
+    # Always show Face results from session_state (persist across reruns)
+    face_message_value = st.session_state.get("face_message", "")
+    st.text_area("Face Match Results", face_message_value, height=120, key="face_results_display")
+
+    # Always show cropped faces if available
+    if st.session_state.get("face_cropped_id") is not None and st.session_state.get("face_cropped_selfie") is not None:
+        st.markdown("### Cropped Face Comparison")
+        crop_col1, crop_col2 = st.columns(2)
+        with crop_col1:
+            st.markdown("**ID/License Face:**")
+            st.image(st.session_state["face_cropped_id"], width=200, caption="Extracted from ID document")
+        with crop_col2:
+            st.markdown("**Selfie Face:**")
+            st.image(st.session_state["face_cropped_selfie"], width=200, caption="Extracted from selfie")
 
     if face_verify_btn:
         if id_image is None or selfie_image is None:
@@ -724,24 +749,18 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
 
                     message, face_debug, cropped_id, cropped_selfie = verify_faces(id_img_pil, selfie_img_pil, arcface_ok, arcface_reason)
 
-                    # Display results in styled text area (now only verdict + matching score)
-                    st.text_area("Face Match Results", message, height=120, key="face_results")
+                    # Persist results to session_state (so they survive reruns)
+                    st.session_state["face_message"] = message
+                    st.session_state["face_cropped_id"] = cropped_id
+                    st.session_state["face_cropped_selfie"] = cropped_selfie
 
                     # Save face debug JSON to session for Debug dropdown at the end
                     if face_debug is not None:
                         st.session_state["face_debug_json"] = {"data": {"face_verification": face_debug}}
 
-                    # Display cropped faces if available
-                    if cropped_id is not None and cropped_selfie is not None:
-                        st.markdown("### Cropped Face Comparison")
-                        crop_col1, crop_col2 = st.columns(2)
-                        with crop_col1:
-                            st.markdown("**ID/License Face:**")
-                            st.image(cropped_id, width=200, caption="Extracted from ID document")
-                        with crop_col2:
-                            st.markdown("**Selfie Face:**")
-                            st.image(cropped_selfie, width=200, caption="Extracted from selfie")
-
+                    # Also render immediately this run
+                    st.session_state["face_message"] = message  # already set
+                    st.experimental_rerun()  # ensures the always-on widgets above show latest
                 except Exception as e:
                     st.error(f"❌ Error processing images: {str(e)}")
 
