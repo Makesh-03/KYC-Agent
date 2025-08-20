@@ -99,6 +99,17 @@ def get_llm():
         max_tokens=2000,
     )
 
+# NEW: JSON-native LLM for decision reason
+def get_json_llm():
+    return ChatOpenAI(
+        temperature=0.1,
+        model_name="openai/gpt-4o",
+        base_url="https://openrouter.ai/api/v1",
+        openai_api_key=OPENROUTER_API_KEY,
+        max_tokens=800,
+        model_kwargs={"response_format": {"type": "json_object"}},
+    )
+
 def clean_address(raw_response, original_text=""):
     flattened = raw_response.replace("\n", ", ").replace(" ", " ").strip()
     flattened = re.sub(r"^(?:\s*(\d{1,2}(?:\.\d)?[\.\):])\s*)+", "", flattened)
@@ -349,7 +360,6 @@ def compute_decision_and_score(doc_stats: dict | None, face_stats: dict | None):
     Returns (decision: str, combined_score: float).
     """
     if not doc_stats:
-        # No document verification → reject (we can relax later if desired)
         combined = float(face_stats["matching_score_pct"]) if face_stats and "matching_score_pct" in face_stats else 0.0
         return "REJECTED", round(combined, 1)
 
@@ -362,7 +372,6 @@ def compute_decision_and_score(doc_stats: dict | None, face_stats: dict | None):
     maps_all_ok = all(doc_stats.get("maps_verified_flags", [])) if doc_stats.get("maps_verified_flags") else False
     doc_final_result = bool(st.session_state.get("doc_final_result", False))
 
-    # Face tiers
     face_present = face_stats is not None and "matching_score_pct" in face_stats
     matching = float(face_stats["matching_score_pct"]) if face_present else None
     face_pass = face_present and matching is not None and matching >= 60
@@ -374,7 +383,7 @@ def compute_decision_and_score(doc_stats: dict | None, face_stats: dict | None):
     else:
         combined = round(float(overall_pct), 1)
 
-    # Doc pass primarily uses your existing final flag (already includes thresholds + maps + matches)
+    # Doc pass follows your final flag + explicit threshold checks
     doc_pass = doc_final_result and addr_pct >= addr_t and name_pct >= name_t and maps_all_ok
 
     # Decision tiers
@@ -391,11 +400,28 @@ def compute_decision_and_score(doc_stats: dict | None, face_stats: dict | None):
 
     return decision, combined
 
+# MORE ROBUST JSON EXTRACTOR
 def extract_json_block(text: str) -> dict:
-    m = re.search(r"\{[\s\S]*\}\s*$", text.strip())
-    if not m:
-        raise ValueError("LLM did not return JSON")
-    return json.loads(m.group(0))
+    # 1) Direct parse
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    # 2) Strip common code fences
+    s = text.strip()
+    if s.startswith("```"):
+        s = re.sub(r"^```[a-zA-Z]*\n?", "", s)
+        s = re.sub(r"\n```$", "", s)
+        try:
+            return json.loads(s)
+        except Exception:
+            pass
+    # 3) Fallback: grab the last {...} block
+    l = s.rfind("{")
+    r = s.rfind("}")
+    if l != -1 and r != -1 and r > l:
+        return json.loads(s[l:r+1])
+    raise ValueError("LLM did not return JSON")
 
 def generate_llm_reason(doc_stats: dict | None, face_stats: dict | None, decision: str, score: float) -> dict:
     input_payload = {
@@ -405,10 +431,11 @@ def generate_llm_reason(doc_stats: dict | None, face_stats: dict | None, decisio
         "face_verification": face_stats if face_stats else {"note": "not_performed"},
     }
     chain = LLMChain(
-        llm=get_llm(),
+        llm=get_json_llm(),  # use JSON-native LLM
         prompt=PromptTemplate(template=LLM_DECISION_PROMPT, input_variables=["input_json"])
     )
     resp = chain.invoke({"input_json": json.dumps(input_payload, ensure_ascii=False)})
+    # LangChain returns dict with "text" for LLMChain
     return extract_json_block(resp["text"])
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -451,7 +478,6 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             address_match_flags.append(match)
             maps_verified_flags.append(verified)
 
-            # Keep per-document fields to show in dropdown (cleaned)
             per_doc_clean_fields[f"document{idx+1}"] = filter_non_null_fields(fields)
 
         # Address consistency between first two docs
@@ -514,7 +540,6 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
         data_block = {"result": result_block}
         data_block.update(per_doc_clean_fields)
         json_dropdown_payload = {"data": data_block}
-        # Save to session for Debug section (rendered at the very end)
         st.session_state["kyc_debug_json"] = json_dropdown_payload
 
         # Persist thresholds & doc stats for decision engine + LLM
@@ -529,7 +554,7 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             "average_authenticity_pct": int(round(avg_authenticity_score * 100)),
             "address_match_flags": address_match_flags,
             "maps_verified_flags": maps_verified_flags,
-            "names": names[:2],        # use first two for comparison context
+            "names": names[:2],
             "addresses": addresses[:2],
             "thresholds": {
                 "address_pct": st.session_state.get("address_threshold_pct", 82),
@@ -537,7 +562,7 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             }
         }
 
-        # NEW: persist KYC visible outputs
+        # Persist visible outputs
         st.session_state["kyc_status_html"] = status
         st.session_state["kyc_output_html"] = format_verification_table(results)
 
@@ -629,7 +654,6 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                 status, output_html, _document_info_json = kyc_multi_verify(
                     file_inputs, expected_address, consistency_threshold, name_threshold
                 )
-                # Also render immediately this run
                 status_placeholder.markdown(status, unsafe_allow_html=True)
                 output_placeholder.markdown(output_html, unsafe_allow_html=True)
         else:
@@ -687,26 +711,21 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                     try:
                         from deepface import DeepFace
                         import tensorflow as tf
-                        # Force TensorFlow to use CPU to avoid GPU-related issues
                         tf.config.set_visible_devices([], 'GPU')
                     except Exception as import_error:
                         st.error(f"❌ Could not import DeepFace library: {str(import_error)}")
                         st.info("💡 Face verification requires the DeepFace library. Please install it with: pip install deepface")
                         st.stop()
 
-                    # ---- ArcFace compatibility probe (require TF 2.15 + Keras 2.x or tf-keras 2.15) ----
+                    # ---- ArcFace compatibility probe ----
                     arcface_ok = False
                     arcface_reason = ""
-
-                    # Check TensorFlow version
                     try:
                         import tensorflow as tf  # noqa: F401
                         tf_ok = str(tf.__version__).startswith("2.15")
                     except Exception as e:
                         tf_ok = False
                         arcface_reason = f"TensorFlow not compatible ({e})"
-
-                    # Check for tf-keras shim and/or Keras 2.x
                     tk_ok = False
                     keras2_ok = False
                     try:
@@ -722,9 +741,7 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                     except Exception as e:
                         if not arcface_reason:
                             arcface_reason = f"Keras not importable ({e})"
-
                     arcface_ok = tf_ok and (tk_ok or keras2_ok)
-
                     if not arcface_ok:
                         st.info(
                             "ℹ️ ArcFace disabled due to incompatible runtime. Requires TensorFlow 2.15.x and either "
@@ -740,7 +757,6 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                         st.error(f"❌ Could not load face detection cascade: {str(cascade_error)}")
                         st.stop()
 
-                    # Face helpers
                     def auto_crop_face(image_pil):
                         if image_pil.mode != "RGB":
                             image_pil = image_pil.convert("RGB")
@@ -779,7 +795,6 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                                 cropped1.save(tmp1.name)
                                 cropped2.save(tmp2.name)
 
-                                # Build the model trial list dynamically
                                 models_to_try = [
                                     ("VGG-Face", "opencv"),
                                     ("Facenet", "opencv"),
@@ -792,14 +807,14 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                                 ])
 
                                 distances = []
-                                model_results = []  # structured per-model results
-
+                                model_results = []
                                 debug_info = {}
                                 if not arcface_ok and arcface_reason:
                                     debug_info["arcface_note"] = (
                                         f"ArcFace skipped: {arcface_reason}. Requires TF 2.15 + (Keras 2.x or tf-keras 2.15)."
                                     )
 
+                                from deepface import DeepFace
                                 for model_name, detector in models_to_try:
                                     try:
                                         result = DeepFace.verify(
@@ -820,13 +835,9 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                                             "distance": round(dist, 4),
                                             "similarity_percent": round(sim, 2)
                                         })
-
-                                        # Stop early once we have 3 successful signals
                                         if len(distances) >= 3:
                                             break
-
                                     except Exception:
-                                        # Skip failed model entries in results list
                                         continue
 
                                 if not distances:
@@ -842,15 +853,13 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                                 else:
                                     verdict = "❌ Face Didn't Match"
 
-                                # Display message (ONLY verdict + matching score)
                                 display_message = (
                                     f"{verdict}\n"
                                     f"Matching score: {max_similarity:.2f}%"
                                 )
 
-                                # Build debug JSON payload (for Debug dropdown)
                                 debug_info.update({
-                                    "matching_score_pct": round(max_similarity, 2),          # added
+                                    "matching_score_pct": round(max_similarity, 2),
                                     "average_similarity_percent": round(avg_similarity, 2),
                                     "successful_models": f"{len(distances)}/{len(models_to_try)}",
                                     "model_results": model_results
@@ -862,18 +871,15 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                             return (f"❌ Face verification error: {str(e)}\n\n"
                                     f"Tip: Try using clearer images with good lighting."), None, None, None
 
-                    # Process the uploaded images
                     id_img_pil = Image.open(id_image)
                     selfie_img_pil = Image.open(selfie_image)
 
                     message, face_debug, cropped_id, cropped_selfie = verify_faces(id_img_pil, selfie_img_pil, arcface_ok, arcface_reason)
 
-                    # Persist results to session_state (so they survive reruns)
                     st.session_state["face_message"] = message
                     st.session_state["face_cropped_id"] = cropped_id
                     st.session_state["face_cropped_selfie"] = cropped_selfie
 
-                    # Save face debug JSON + face_stats to session for decision/LLM
                     if face_debug is not None:
                         st.session_state["face_debug_json"] = {"data": {"face_verification": face_debug}}
                         st.session_state["face_stats"] = {
@@ -882,9 +888,8 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                             "successful_models": face_debug.get("successful_models"),
                         }
 
-                    # Also render immediately this run
-                    st.session_state["face_message"] = message  # already set
-                    st.experimental_rerun()  # ensures the always-on widgets above show latest
+                    st.session_state["face_message"] = message
+                    st.experimental_rerun()
                 except Exception as e:
                     st.error(f"❌ Error processing images: {str(e)}")
 
@@ -892,7 +897,6 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
     st.markdown("<hr style='border: 1px solid #a020f0; margin: 30px 0;'>", unsafe_allow_html=True)
     st.markdown("<h3>🐞 Debug</h3>", unsafe_allow_html=True)
     with st.expander("Debug Data (JSON)", expanded=False):
-        # Merge KYC debug JSON and Face verification debug JSON under a single 'data' object
         debug_payload = st.session_state.get("kyc_debug_json", {"data": {}})
         if "data" not in debug_payload:
             debug_payload["data"] = {}
@@ -900,19 +904,16 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
         if isinstance(face_dbg, dict) and "data" in face_dbg and "face_verification" in face_dbg["data"]:
             debug_payload["data"]["face_verification"] = face_dbg["data"]["face_verification"]
 
-        # Build or refresh decision block (deterministic) + ask LLM for reason
         doc_stats = st.session_state.get("doc_stats")
         face_stats = st.session_state.get("face_stats")
 
         try:
             decision, combined_score = compute_decision_and_score(doc_stats, face_stats)
             llm_block = generate_llm_reason(doc_stats, face_stats, decision, combined_score)
-            # Ensure LLM echoes our decision/score; fallback to deterministic if missing
             debug_payload["data"]["decision"] = llm_block.get("decision", decision)
             debug_payload["data"]["score"] = llm_block.get("score", combined_score)
             debug_payload["data"]["reason"] = llm_block.get("reason", f"Decision={decision}, score={combined_score}.")
         except Exception as e:
-            # Fallback if LLM errors
             if doc_stats or face_stats:
                 fallback_decision, fallback_score = compute_decision_and_score(doc_stats, face_stats)
                 debug_payload["data"]["decision"] = fallback_decision
