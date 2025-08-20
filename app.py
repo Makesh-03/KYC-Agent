@@ -99,7 +99,7 @@ def get_llm():
         max_tokens=2000,
     )
 
-# NEW: JSON-native LLM for decision reason
+# JSON-native LLM for decision reason
 def get_json_llm():
     return ChatOpenAI(
         temperature=0.1,
@@ -251,9 +251,19 @@ def semantic_match(text1, text2, threshold=0.82):
     sim = util.cos_sim(embeddings[0], embeddings[1]).item()
     return sim, sim >= threshold
 
+# NEW: simple Canadian-format detector (postal code)
+def is_canadian_address(text: str) -> bool:
+    if not text:
+        return False
+    return bool(re.search(r"\b[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z][ -]?\d[ABCEGHJ-NPRSTV-Z]\d\b", text.upper()))
+
 def verify_with_google_maps(address):
+    """
+    Returns (verified_bool, formatted_address, country_code)
+    country_code like 'CA', 'IN', etc. None if unavailable.
+    """
     if not GOOGLE_MAPS_API_KEY:
-        return False, "No API key provided"
+        return False, "No API key provided", None
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {
         "address": address,
@@ -264,11 +274,17 @@ def verify_with_google_maps(address):
     try:
         data = response.json()
         if data.get("status") == "OK" and data.get("results"):
-            formatted_address = data["results"][0].get("formatted_address", address)
-            return True, formatted_address
-        return False, address
+            res = data["results"][0]
+            formatted_address = res.get("formatted_address", address)
+            country_code = None
+            for comp in res.get("address_components", []):
+                if "country" in comp.get("types", []):
+                    country_code = comp.get("short_name")
+                    break
+            return True, formatted_address, country_code
+        return False, address, None
     except Exception:
-        return False, address
+        return False, address, None
 
 # ── Fixed Table builder ──────────────────────────────────────────────────────
 def format_verification_table(results):
@@ -280,7 +296,6 @@ def format_verification_table(results):
 
     doc_count = len([k for k in results.keys() if k.startswith("extracted_address_")])
 
-    # Create a clean HTML table without extra indentation
     table_html = f'''<div style="background-color:#111; color:white; border:2px solid #a64dff; padding:16px; border-radius:12px; font-family:Arial, sans-serif; overflow-x:auto;">
 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; border-bottom:1px solid #a64dff; padding-bottom:10px; margin-bottom:16px;">
 <span style="font-weight:bold;">Final Result: <span style="color:{final_color};">{final_text}</span></span>
@@ -329,7 +344,6 @@ def format_verification_table(results):
     table_html += '''</tbody>
 </table>
 </div>'''
-    
     return table_html
 
 # ── Decision + LLM Reasoning helpers ─────────────────────────────────────────
@@ -337,28 +351,25 @@ LLM_DECISION_PROMPT = """
 You are a concise KYC compliance analyst. You receive a structured JSON input and you MUST return a SINGLE JSON object with exactly these keys:
 - "decision": string (MUST equal the provided "computed_decision")
 - "score": number (MUST equal the provided "computed_score")
-- "reason": string (1–4 sentences, factual, references actual numeric values and thresholds)
+- "reason": string (2–5 sentences, factual, referencing numeric values and thresholds)
 
-Rules:
-- Do NOT invent values. Use ONLY what is provided.
-- If names across documents differ, say so and show both names.
-- If address consistency is below threshold, say so and include both the % and threshold.
-- If any Google Maps verification failed, mention which document index(es).
-- If face matching is < 55%, say "face didn't match" / "appears to be different person".
-- If 45–59.99%, call it "borderline face match".
-- If face verification not performed, state that plainly.
-- If everything passes, say that all checks satisfied the thresholds.
-- Return PURE JSON only. No markdown, no commentary.
+Important guidance for your reason:
+- Use ONLY facts in the input.
+- If address consistency is below the threshold, say that addresses don't match and include the % vs threshold.
+- If countries differ across documents, explicitly say so (e.g., "Doc1=CA, Doc2=IN").
+- If any document's country != expected_region, mention that (e.g., "Doc2 is not Canadian").
+- If a document lacks Canadian-format postal code while expected_region=CA, mention it.
+- If names match but addresses don't, say that explicitly.
+- If any Google Maps verification failed, mention the doc index.
+- If face matching < 55%, say "face didn't match / appears to be different person"; 45–59.99% is "borderline".
+- If face verification not performed, state it plainly.
+- Keep the tone audit-style; avoid speculation. Return PURE JSON only.
 
 Input JSON:
 {input_json}
 """
 
 def compute_decision_and_score(doc_stats: dict | None, face_stats: dict | None):
-    """
-    Deterministic decision/score from existing metrics.
-    Returns (decision: str, combined_score: float).
-    """
     if not doc_stats:
         combined = float(face_stats["matching_score_pct"]) if face_stats and "matching_score_pct" in face_stats else 0.0
         return "REJECTED", round(combined, 1)
@@ -377,16 +388,13 @@ def compute_decision_and_score(doc_stats: dict | None, face_stats: dict | None):
     face_pass = face_present and matching is not None and matching >= 60
     face_borderline = face_present and matching is not None and 45 <= matching < 60
 
-    # Combined score
     if face_present and matching is not None:
         combined = round(0.6 * overall_pct + 0.4 * matching, 1)
     else:
         combined = round(float(overall_pct), 1)
 
-    # Doc pass follows your final flag + explicit threshold checks
     doc_pass = doc_final_result and addr_pct >= addr_t and name_pct >= name_t and maps_all_ok
 
-    # Decision tiers
     if doc_pass and face_pass:
         decision = "APPROVED"
     elif doc_pass and not face_present:
@@ -400,14 +408,11 @@ def compute_decision_and_score(doc_stats: dict | None, face_stats: dict | None):
 
     return decision, combined
 
-# MORE ROBUST JSON EXTRACTOR
 def extract_json_block(text: str) -> dict:
-    # 1) Direct parse
     try:
         return json.loads(text)
     except Exception:
         pass
-    # 2) Strip common code fences
     s = text.strip()
     if s.startswith("```"):
         s = re.sub(r"^```[a-zA-Z]*\n?", "", s)
@@ -416,7 +421,6 @@ def extract_json_block(text: str) -> dict:
             return json.loads(s)
         except Exception:
             pass
-    # 3) Fallback: grab the last {...} block
     l = s.rfind("{")
     r = s.rfind("}")
     if l != -1 and r != -1 and r > l:
@@ -427,15 +431,15 @@ def generate_llm_reason(doc_stats: dict | None, face_stats: dict | None, decisio
     input_payload = {
         "computed_decision": decision,
         "computed_score": score,
+        "expected_region": "CA",
         "document_verification": doc_stats if doc_stats else {"note": "not_performed"},
         "face_verification": face_stats if face_stats else {"note": "not_performed"},
     }
     chain = LLMChain(
-        llm=get_json_llm(),  # use JSON-native LLM
+        llm=get_json_llm(),
         prompt=PromptTemplate(template=LLM_DECISION_PROMPT, input_variables=["input_json"])
     )
     resp = chain.invoke({"input_json": json.dumps(input_payload, ensure_ascii=False)})
-    # LangChain returns dict with "text" for LLMChain
     return extract_json_block(resp["text"])
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -453,6 +457,9 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
 
         address_match_flags = []
         maps_verified_flags = []
+        gmaps_country_codes = []
+        gmaps_formatted_addresses = []
+        canadian_format_flags = []
 
         for idx, file in enumerate(files):
             text = extract_text_from_file(file)
@@ -461,7 +468,7 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             name = fields.get("full_name", "Not provided")
 
             sim, match = semantic_match(address, expected_address)
-            verified, google_maps_address = verify_with_google_maps(address)
+            verified, google_maps_address, country_code = verify_with_google_maps(address)
             auth_score, _ = semantic_match(address, google_maps_address)
 
             authenticity_scores.append(auth_score)
@@ -477,15 +484,16 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
 
             address_match_flags.append(match)
             maps_verified_flags.append(verified)
+            gmaps_country_codes.append(country_code)
+            gmaps_formatted_addresses.append(google_maps_address)
+            canadian_format_flags.append(is_canadian_address(address))
 
             per_doc_clean_fields[f"document{idx+1}"] = filter_non_null_fields(fields)
 
-        # Address consistency between first two docs
         address_consistency_score, address_consistent = semantic_match(
             addresses[0], addresses[1], threshold=consistency_threshold
         )
 
-        # Name consistency using name_threshold
         if names[0] != "Not provided" and names[1] != "Not provided":
             name_consistency_score, name_consistent = semantic_match(
                 names[0], names[1], threshold=name_threshold
@@ -493,13 +501,9 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
         else:
             name_consistency_score, name_consistent = (0, False)
 
-        # Average authenticity
         avg_authenticity_score = sum(authenticity_scores) / len(authenticity_scores)
-
-        # Overall score (address + name) average
         overall_score = (address_consistency_score + name_consistency_score) / 2.0
 
-        # Populate results for the table header
         results["address_consistency_score"] = round(address_consistency_score, 3)
         results["name_consistency_score"] = round(name_consistency_score, 3)
         results["document_consistency_score"] = round(address_consistency_score, 3)
@@ -507,12 +511,10 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
         results["average_authenticity_score"] = round(avg_authenticity_score, 3)
         results["overall_score"] = round(overall_score, 3)
 
-        # Final decision logic (documents)
         results["final_result"] = all(
             [results[f"address_match_{i+1}"] and results[f"google_maps_verified_{i+1}"] for i in range(len(files))]
         ) and (address_consistency_score >= consistency_threshold) and name_consistent
 
-        # Status block — Overall Score first
         status = (
             f"✅ <b style='color:green;'>Verification Passed</b><br>"
             f"Overall Score: <b>{int(round(results['overall_score'] * 100))}%</b><br>"
@@ -542,7 +544,7 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
         json_dropdown_payload = {"data": data_block}
         st.session_state["kyc_debug_json"] = json_dropdown_payload
 
-        # Persist thresholds & doc stats for decision engine + LLM
+        # Persist thresholds & rich doc stats for decision engine + LLM
         st.session_state["address_threshold_pct"] = int(round(consistency_threshold * 100))
         st.session_state["name_threshold_pct"] = int(round(name_threshold * 100))
         st.session_state["doc_final_result"] = bool(results["final_result"])
@@ -556,13 +558,15 @@ def kyc_multi_verify(files, expected_address, consistency_threshold, name_thresh
             "maps_verified_flags": maps_verified_flags,
             "names": names[:2],
             "addresses": addresses[:2],
+            "gmaps_country_codes": gmaps_country_codes[:2],
+            "gmaps_formatted_addresses": gmaps_formatted_addresses[:2],
+            "canadian_format_flags": canadian_format_flags[:2],
             "thresholds": {
                 "address_pct": st.session_state.get("address_threshold_pct", 82),
                 "name_pct": st.session_state.get("name_threshold_pct", 80),
             }
         }
 
-        # Persist visible outputs
         st.session_state["kyc_status_html"] = status
         st.session_state["kyc_output_html"] = format_verification_table(results)
 
@@ -642,7 +646,6 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
     with st.expander("View Full Verification Details", expanded=False):
         output_placeholder = st.empty()
 
-    # Rehydrate KYC outputs every run
     if "kyc_status_html" in st.session_state:
         status_placeholder.markdown(st.session_state["kyc_status_html"], unsafe_allow_html=True)
     if "kyc_output_html" in st.session_state:
@@ -651,7 +654,7 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
     if verify_btn:
         if file_inputs and expected_address and consistency_threshold and name_threshold:
             with st.spinner("Verifying..."):
-                status, output_html, _document_info_json = kyc_multi_verify(
+                status, output_html, _ = kyc_multi_verify(
                     file_inputs, expected_address, consistency_threshold, name_threshold
                 )
                 status_placeholder.markdown(status, unsafe_allow_html=True)
@@ -661,7 +664,7 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                 "Please provide all required inputs: at least two documents, expected address, and both thresholds."
             )
 
-    # Face Verification Section - MOVED TO THE END
+    # Face Verification Section
     st.markdown("<hr style='border: 1px solid #a020f0; margin: 30px 0;'>", unsafe_allow_html=True)
     st.markdown("<h3>🧑‍💼 Face Verification</h3>", unsafe_allow_html=True)
     st.markdown("Compare faces from ID document and selfie image using advanced deep learning models.", unsafe_allow_html=True)
@@ -680,11 +683,9 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
 
     st.markdown("<span class='purple-circle'>9</span> <b>Face Verification Results</b>", unsafe_allow_html=True)
 
-    # Always show Face results from session_state (persist across reruns)
     face_message_value = st.session_state.get("face_message", "")
     st.text_area("Face Match Results", face_message_value, height=120, key="face_results_display")
 
-    # Always show cropped faces if available
     if st.session_state.get("face_cropped_id") is not None and st.session_state.get("face_cropped_selfie") is not None:
         st.markdown("### Cropped Face Comparison")
         crop_col1, crop_col2 = st.columns(2)
@@ -701,23 +702,19 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
         else:
             with st.spinner("Analyzing faces..."):
                 try:
-                    # Import face verification libraries only when needed
                     import cv2
                     import numpy as np
                     from PIL import Image
                     import tempfile
-
-                    # Import DeepFace with error handling
                     try:
                         from deepface import DeepFace
                         import tensorflow as tf
                         tf.config.set_visible_devices([], 'GPU')
                     except Exception as import_error:
                         st.error(f"❌ Could not import DeepFace library: {str(import_error)}")
-                        st.info("💡 Face verification requires the DeepFace library. Please install it with: pip install deepface")
+                        st.info("💡 pip install deepface")
                         st.stop()
 
-                    # ---- ArcFace compatibility probe ----
                     arcface_ok = False
                     arcface_reason = ""
                     try:
@@ -743,12 +740,8 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                             arcface_reason = f"Keras not importable ({e})"
                     arcface_ok = tf_ok and (tk_ok or keras2_ok)
                     if not arcface_ok:
-                        st.info(
-                            "ℹ️ ArcFace disabled due to incompatible runtime. Requires TensorFlow 2.15.x and either "
-                            "Keras 2.x or tf-keras 2.15. Using VGG-Face and Facenet only."
-                        )
+                        st.info("ℹ️ ArcFace disabled; using VGG-Face and Facenet only.")
 
-                    # Load Haar cascade for face detection
                     try:
                         face_cascade = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
                         if face_cascade.empty():
@@ -811,7 +804,7 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                                 debug_info = {}
                                 if not arcface_ok and arcface_reason:
                                     debug_info["arcface_note"] = (
-                                        f"ArcFace skipped: {arcface_reason}. Requires TF 2.15 + (Keras 2.x or tf-keras 2.15)."
+                                        f"ArcFace skipped: {arcface_reason}."
                                     )
 
                                 from deepface import DeepFace
@@ -913,7 +906,7 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
             debug_payload["data"]["decision"] = llm_block.get("decision", decision)
             debug_payload["data"]["score"] = llm_block.get("score", combined_score)
             debug_payload["data"]["reason"] = llm_block.get("reason", f"Decision={decision}, score={combined_score}.")
-        except Exception as e:
+        except Exception:
             if doc_stats or face_stats:
                 fallback_decision, fallback_score = compute_decision_and_score(doc_stats, face_stats)
                 debug_payload["data"]["decision"] = fallback_decision
@@ -928,7 +921,6 @@ h3 { color: #a020f0 !important; font-weight: bold !important; }
                 debug_payload["data"]["reason"] = "Insufficient data: run document verification and/or face verification."
 
         st.json(debug_payload)
-    # ──────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     main()
