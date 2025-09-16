@@ -13,7 +13,7 @@ from langchain.chains import LLMChain
 from langchain_community.chat_models import ChatOpenAI
 
 # ── MUST be the first Streamlit call ───────────────────────────────────────────
-st.set_page_config(page_title="EZOFIS KYC Agent", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="KYC Agent", page_icon="🔍", layout="wide")
 # ───────────────────────────────────────────────────────────────────────────────
 
 # --- Config ---
