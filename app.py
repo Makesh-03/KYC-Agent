@@ -8,8 +8,16 @@ import os
 import time
 import mimetypes
 from sentence_transformers import SentenceTransformer, util
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+
+# --- LangChain imports: try modern top-level exports first, then fall back ---
+try:
+    # Newer LangChain versions often export these at top-level
+    from langchain import PromptTemplate, LLMChain
+except Exception:
+    # Older or alternate installs may still have the submodules
+    from langchain.prompts import PromptTemplate
+    from langchain.chains import LLMChain
+
 from langchain_community.chat_models import ChatOpenAI
 
 # ── MUST be the first Streamlit call ───────────────────────────────────────────
